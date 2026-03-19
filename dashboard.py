@@ -392,23 +392,51 @@ def render_html(items, stats):
       text-transform: uppercase; letter-spacing: 0.06em; padding: 0;
     }}
     .toggle-btn:hover {{ color: #666; }}
+    .intro {{ max-width: 720px; margin: 0 auto 16px; font-size: 0.88rem; color: #666; line-height: 1.5; }}
+    .how-it-works-toggle {{
+      background: none; border: none; cursor: pointer;
+      font-size: 0.8rem; color: #bbb; padding: 0; margin-top: 6px;
+      display: block; text-decoration: underline; text-underline-offset: 2px;
+    }}
+    .how-it-works-toggle:hover {{ color: #888; }}
+    .how-it-works {{
+      display: none; margin-top: 12px; padding: 14px 16px;
+      background: white; border-radius: 8px; border: 1px solid #e5e5e5;
+      font-size: 0.84rem; color: #555; line-height: 1.6;
+    }}
+    .how-it-works h3 {{ font-size: 0.78rem; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 4px; }}
+    .how-it-works h3:first-child {{ margin-top: 0; }}
     .liked-section {{ display: none; margin-top: 10px; }}
     .liked-section .card {{ opacity: 0.55; background: #fafafa; }}
     .liked-section .card:hover {{ opacity: 0.8; }}
     .done-section {{ display: none; margin-top: 10px; }}
     .done-section .card {{ opacity: 0.5; background: #fafafa; }}
-    .generated {{ max-width: 720px; margin: 28px auto 0; font-size: 0.78rem; color: #bbb; }}
     a {{ color: #bbb; }}
   </style>
 </head>
 <body>
   <div class="header">
     <h1>Substack Replies</h1>
-    <div class="subtitle">Replies needing a response</div>
+    <div class="subtitle">Generated {now} · last sync {stats['last_sync']}</div>
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
-      <div class="stat"><strong>{stats['last_sync']}</strong>last sync</div>
+    </div>
+  </div>
+
+  <div class="intro">
+    Never miss a reply across your Substack publications. Substack Replies collects comments and replies waiting for your response and surfaces them in one place — no more digging through your inbox.
+    <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
+    <div class="how-it-works" id="how-it-works">
+      <h3>What you're seeing</h3>
+      This list shows comments and replies across your publications that haven't been addressed yet. Click <strong>Open on Substack →</strong> to jump directly to a comment and respond.
+      <h3>Marking items done</h3>
+      Once you've responded to a comment, click <strong>✓ Done</strong> to remove it from your list.<br>
+      <em>Note: Done status is only saved in this browser session. If you refresh or close the browser, items you marked as Done may reappear. To resync the status of your replies, update them through Claude Code.</em>
+      <h3>Liked comments</h3>
+      By default, if you've liked a comment on Substack, Substack Replies takes that as a signal the comment has been acknowledged and hides it from your list. To show all unanswered replies regardless of likes, toggle <strong>Show liked comments</strong> below.
+      <h3>Keeping your data fresh</h3>
+      This view is a snapshot — it won't update on its own. To pull in the latest replies, ask Claude: <em>"sync my Substack replies."</em>
     </div>
   </div>
 
@@ -421,7 +449,7 @@ def render_html(items, stats):
     {empty_msg}
   </div>
 
-  {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Liked / reviewed (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
+  {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Show liked comments (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
 
   <div class="toggle-section">
     <button class="toggle-btn" onclick="toggleDone(this)">▶ Done (<span id="done-count">0</span>)</button>
@@ -432,8 +460,6 @@ def render_html(items, stats):
       </div>
     </div>
   </div>
-
-  <div class="generated">Generated {now} · <a href="javascript:location.reload()">refresh</a></div>
 
   <script>
     const DONE_KEY = 'substack_done';
@@ -523,11 +549,18 @@ def render_html(items, stats):
       btn.textContent = open ? btn.textContent.replace('▲', '▶') : btn.textContent.replace('▶', '▲');
     }}
 
+    function toggleHowItWorks(btn) {{
+      const el = document.getElementById('how-it-works');
+      const open = el.style.display === 'block';
+      el.style.display = open ? 'none' : 'block';
+      btn.textContent = open ? 'How it works ▾' : 'How it works ▴';
+    }}
+
     function toggleLiked(btn) {{
       const section = document.getElementById('liked-section');
       const open = section.style.display === 'block';
       section.style.display = open ? 'none' : 'block';
-      btn.textContent = btn.textContent.replace(open ? '▼' : '▶', open ? '▶' : '▼');
+      btn.textContent = open ? '▶ Show liked comments' : '▼ Hide liked comments';
     }}
 
     function toggleDone(btn) {{
