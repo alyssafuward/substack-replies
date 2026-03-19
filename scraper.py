@@ -22,13 +22,12 @@ from urllib.parse import unquote
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-HANDLE = "alyssafuward"
-USER_ID = 118913109
-# Publications you own (subdomain -> publication id)
-OWN_PUBS = {
-    "alyssafuward": 1269549,
-    "createwithalyssa": 8103931,
-}
+try:
+    from config import USER_ID, HANDLE, OWN_PUBS
+except ImportError:
+    print("Error: config.py not found. Copy config.example.py to config.py and fill in your values.")
+    sys.exit(1)
+
 DB_PATH = Path(__file__).parent / "replies.db"
 
 REPLY_TYPES = {"note_reply", "comment_reply", "new_comment"}

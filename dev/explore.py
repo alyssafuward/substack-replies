@@ -1,19 +1,36 @@
 #!/usr/bin/env python3
 """
-Substack API Explorer
-Run this first to understand the shape of the API before building the full scraper.
+Substack API Explorer — dev/reference tool used to reverse-engineer the API shape.
+Not needed for normal use. Run from the repo root after setting up config.py.
 
 Usage:
   export SUBSTACK_SID="your-cookie-value"
-  python explore.py
+  python dev/explore.py
 """
 
 import os
+import sys
 import json
 import requests
+from pathlib import Path
 
-HANDLE = "alyssafuward"
+# Allow imports from repo root (for config.py)
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from config import USER_ID, HANDLE, OWN_PUBS
+except ImportError:
+    print("Error: config.py not found. Copy config.example.py to config.py and fill in your values.")
+    sys.exit(1)
+
 BASE_URL = "https://substack.com"
+
+# Pick the first pub ID from your config as the default for exploration
+PUB_ID = next(iter(OWN_PUBS.values()), None)
+
+# Replace with a real post ID from your publication to test post-level endpoints
+POST_ID = None  # e.g. a post ID from your publication
+
 
 def get_headers():
     from urllib.parse import unquote
@@ -54,12 +71,6 @@ def probe(label, url, save_as=None):
         print(f"Error: {e}")
     return None
 
-USER_ID = 118913109
-PUB_ID = 1269549  # alyssafuward.substack.com
-
-USER_ID = 118913109
-PUB_ID = 1269549  # alyssafuward.substack.com
-
 def probe_raw(label, url):
     """Print raw response text (not JSON parsed)."""
     print(f"\n{'='*60}")
@@ -73,12 +84,6 @@ def probe_raw(label, url):
         print(f"Body (raw): {repr(resp.text[:500])}")
     except Exception as e:
         print(f"Error: {e}")
-
-POST_ID = 190353949  # "Say the obvious part out loud"
-
-POST_ID = 190353949  # "Say the obvious part out loud"
-
-POST_ID = 190353949
 
 def main():
     print(f"Probing Substack API for handle: {HANDLE}\n")

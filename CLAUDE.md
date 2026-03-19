@@ -1,8 +1,14 @@
 # Substack Replies
 
-A personal tool that scrapes Substack replies and displays them in a local HTML report, so you can track which ones need a response.
+A personal tool that scrapes Substack replies and displays them in a local HTML dashboard, so you can track which ones need a response.
 
 ## Setup (required before running anything)
+
+**1. Create your config file**
+
+Copy `config.example.py` to `config.py` and fill in your values. See the README for how to find each value.
+
+**2. Set your session cookie**
 
 You need your `substack.sid` session cookie. To get it:
 
@@ -15,7 +21,7 @@ You need your `substack.sid` session cookie. To get it:
    source ~/.zshrc
    ```
 
-This writes the cookie to `~/.zshrc` on disk — it stays local to your machine and is never committed to git. When the cookie expires (e.g. after logging out of Substack), find the `SUBSTACK_SID` line in `~/.zshrc` and replace the value, then run `source ~/.zshrc` again.
+When the cookie expires (e.g. after logging out of Substack), find the `SUBSTACK_SID` line in `~/.zshrc` and replace the value, then run `source ~/.zshrc` again.
 
 > **Never paste the cookie value into chat** (including to Claude). Both claude.ai and the Claude Code terminal send conversation content to Anthropic's servers, so the cookie would leave your machine. Always run commands directly in your terminal.
 
@@ -23,21 +29,21 @@ This writes the cookie to `~/.zshrc` on disk — it stays local to your machine 
 
 ```bash
 python scraper.py sync        # fetch latest activity + comments
-python report.py              # generate report.html and open it
+python dashboard.py           # generate dashboard.html and open it
+python check.py               # run sanity checks after any code changes
 ```
 
 ## Configuration
 
-- `USER_ID = 118913109` (alyssafuward)
-- Publications: `alyssafuward` and `createwithalyssa`
-- Data stored in `replies.db` (local SQLite, not committed to git)
+- User config (USER_ID, HANDLE, OWN_PUBS) lives in `config.py` — gitignored, never committed
+- Data stored in `replies.db` (local SQLite, gitignored)
 
 ## How it works
 
 1. Hits Substack's internal API (unofficial, no public docs) authenticated via session cookie
 2. Fetches activity feed (note replies, comment replies) + comments on your own posts
 3. Stores everything in a local SQLite database
-4. `report.py` generates a self-contained HTML file you open in your browser
+4. `dashboard.py` generates a self-contained HTML file you open in your browser
 
 ## When starting a new session
 

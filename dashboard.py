@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate a self-contained HTML report of Substack replies needing response.
+Generate a self-contained HTML dashboard of Substack replies needing response.
 
 Usage:
-  python report.py            # generates report.html and opens it
-  python report.py --no-open  # generates report.html without opening
+  python dashboard.py            # generates dashboard.html and opens it
+  python dashboard.py --no-open  # generates dashboard.html without opening
 """
 
 import sys
@@ -14,11 +14,32 @@ import webbrowser
 from pathlib import Path
 from datetime import datetime
 
-USER_ID = 118913109
+try:
+    from config import USER_ID
+except ImportError:
+    print("Error: config.py not found. Copy config.example.py to config.py and fill in your values.")
+    sys.exit(1)
+
 DB_PATH = Path(__file__).parent / "replies.db"
-OUT_PATH = Path(__file__).parent / "report.html"
+OUT_PATH = Path(__file__).parent / "dashboard.html"
 
 # ── Data ──────────────────────────────────────────────────────────────────────
+
+def load_thread(conn, reply_id):
+    """Return ancestor comments in order (oldest first), excluding the reply itself."""
+    row = conn.execute("SELECT ancestor_path FROM comments WHERE id=?", (reply_id,)).fetchone()
+    if not row or not row[0]:
+        return []
+    ancestor_ids = [int(x) for x in row[0].split(".") if x]
+    if not ancestor_ids:
+        return []
+    placeholders = ",".join("?" * len(ancestor_ids))
+    rows = conn.execute(
+        f"SELECT id, name, body FROM comments WHERE id IN ({placeholders})", ancestor_ids
+    ).fetchall()
+    by_id = {r[0]: r for r in rows}
+    return [{"name": by_id[i][1] or "?", "body": by_id[i][2] or ""} for i in ancestor_ids if i in by_id]
+
 
 def load_data(conn):
     """Return list of dicts representing replies needing response."""
@@ -74,6 +95,8 @@ def load_data(conn):
         else:
             link = ""
 
+        thread = load_thread(conn, reply_id)
+
         results.append({
             "source": "activity",
             "date": (created_at or "")[:10],
@@ -85,6 +108,7 @@ def load_data(conn):
             "link": link,
             "comment_id": reply_id,
             "liked": liked,
+            "thread": thread,
         })
 
     # 2. Unresponded comments on own posts
@@ -127,6 +151,8 @@ def load_data(conn):
         liked_raw = json.loads(liked_row[0] or "{}") if liked_row else {}
         liked = bool(liked_raw.get("reaction"))
 
+        thread = load_thread(conn, cid)
+
         results.append({
             "source": "own_pub",
             "date": (date or "")[:10],
@@ -138,6 +164,7 @@ def load_data(conn):
             "link": link,
             "comment_id": cid,
             "liked": liked,
+            "thread": thread,
         })
 
     return results
@@ -176,6 +203,46 @@ def format_date(raw):
     except:
         return raw[:10]
 
+def render_thread_msg(m):
+    name = escape(m['name'])
+    body = m['body']
+    LIMIT = 120
+    if len(body) <= LIMIT:
+        return f"""<div class="thread-msg">
+      <span class="thread-name">{name}</span>
+      <span class="thread-body">{escape(body)}</span>
+    </div>"""
+    short = escape(body[:LIMIT])
+    full = escape(body)
+    return f"""<div class="thread-msg">
+      <span class="thread-name">{name}</span>
+      <span class="thread-body"><span class="thread-short">{short}<button class="thread-more" onclick="expandThread(this)">… more</button></span><span class="thread-full" style="display:none">{full}<button class="thread-more" onclick="collapseThread(this)"> less</button></span></span>
+    </div>"""
+
+
+def render_thread(thread):
+    """Render ancestor thread. Show last message, hide rest behind toggle."""
+    if not thread:
+        return ""
+
+    last = thread[-1]
+    last_html = render_thread_msg(last)
+
+    if len(thread) <= 1:
+        return f'<div class="thread-context">{last_html}</div>'
+
+    older = thread[:-1]
+    older_html = "".join(render_thread_msg(m) for m in older)
+
+    count = len(older)
+    plural = "s" if count > 1 else ""
+    return f"""<div class="thread-context">
+      <button class="thread-toggle" onclick="toggleThread(this)">▶ {count} earlier message{plural}</button>
+      <div class="thread-older" style="display:none">{older_html}</div>
+      {last_html}
+    </div>"""
+
+
 def render_card(item, section="action"):
     date = escape(format_date(item.get("raw_date", item["date"])))
     who = escape(item["who"])
@@ -185,11 +252,13 @@ def render_card(item, section="action"):
     link = item["link"]
     liked = item.get("liked", False)
     cid = item["comment_id"]
+    thread = item.get("thread", [])
     source_badge = "note" if item["source"] == "activity" and "note" in item["label"] else ("comment" if item["source"] == "activity" else "your post")
     your_label = "Your post:" if item["source"] == "own_pub" else "Your content:"
 
     liked_badge = '<span class="liked-badge">❤️ liked</span>' if liked else ""
     link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open on Substack →</a>' if link else ""
+    thread_html = render_thread(thread)
 
     return f"""
     <div class="card" data-id="{cid}" data-section="{section}">
@@ -205,7 +274,8 @@ def render_card(item, section="action"):
         </div>
       </div>
       <div class="who">{who} <span class="label">{label}</span></div>
-      {"<div class='your-content'><span class='field-label'>" + your_label + "</span> " + your + "</div>" if your else ""}
+      {"<div class='your-content'><span class='field-label'>" + your_label + "</span> " + your + "</div>" if your and not thread_html else ""}
+      {thread_html}
       <div class="their-content"><span class="field-label">Their reply:</span> {theirs}</div>
     </div>
     """
@@ -291,6 +361,23 @@ def render_html(items, stats):
       font-size: 0.85rem; color: #888; margin-bottom: 8px;
       padding: 7px 11px; background: #fafafa; border-radius: 6px; border-left: 3px solid #e0e0e0;
     }}
+    .thread-context {{
+      margin-bottom: 8px;
+    }}
+    .thread-toggle {{
+      background: none; border: none; cursor: pointer;
+      font-size: 0.75rem; color: #bbb; padding: 0 0 4px 0;
+    }}
+    .thread-toggle:hover {{ color: #888; }}
+    .thread-msg {{
+      font-size: 0.82rem; color: #999;
+      padding: 5px 10px; background: #f7f7f7; border-radius: 6px;
+      border-left: 3px solid #e0e0e0; margin-bottom: 4px;
+    }}
+    .thread-name {{ font-weight: 600; color: #888; margin-right: 6px; }}
+    .thread-body {{ color: #aaa; }}
+    .thread-more {{ background: none; border: none; cursor: pointer; color: #bbb; font-size: 0.78rem; padding: 0; }}
+    .thread-more:hover {{ color: #888; }}
     .their-content {{
       font-size: 0.92rem; color: #222;
       padding: 7px 11px; background: #fef8f6; border-radius: 6px; border-left: 3px solid #ff3300;
@@ -419,6 +506,23 @@ def render_html(items, stats):
       document.getElementById('done-count').textContent = n;
     }}
 
+    function expandThread(btn) {{
+      const msg = btn.closest('.thread-msg');
+      msg.querySelector('.thread-short').style.display = 'none';
+      msg.querySelector('.thread-full').style.display = '';
+    }}
+    function collapseThread(btn) {{
+      const msg = btn.closest('.thread-msg');
+      msg.querySelector('.thread-short').style.display = '';
+      msg.querySelector('.thread-full').style.display = 'none';
+    }}
+    function toggleThread(btn) {{
+      const older = btn.nextElementSibling;
+      const open = older.style.display === 'block';
+      older.style.display = open ? 'none' : 'block';
+      btn.textContent = open ? btn.textContent.replace('▲', '▶') : btn.textContent.replace('▶', '▲');
+    }}
+
     function toggleLiked(btn) {{
       const section = document.getElementById('liked-section');
       const open = section.style.display === 'block';
@@ -459,7 +563,7 @@ def render_html(items, stats):
 
 def main():
     if not DB_PATH.exists():
-        print("No database found. Run: python scraper.py sync")
+        print("No data found. Run: python scraper.py sync")
         sys.exit(1)
 
     with sqlite3.connect(DB_PATH) as conn:

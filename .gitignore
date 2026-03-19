@@ -1,9 +1,11 @@
 replies.db
 .env
+config.py
 *.json
 __pycache__/
 *.pyc
 report.html
+dashboard.html
 .DS_Store
 conversation.md
 conversation_part*.md
