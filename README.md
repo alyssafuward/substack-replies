@@ -4,6 +4,8 @@ A personal tool that scrapes your Substack replies and surfaces them in a local 
 
 Built for writers who publish on multiple Substack publications and want a single inbox view across all of them.
 
+> **Note on the API:** This tool uses Substack's internal API, which is unofficial and undocumented. It works as of the time of writing but could break if Substack changes their API. No data is sent anywhere — everything stays on your machine.
+
 ---
 
 ## How it works
@@ -13,42 +15,21 @@ Built for writers who publish on multiple Substack publications and want a singl
 3. Stores everything in a local SQLite database (`replies.db`)
 4. Generates a self-contained HTML dashboard you open in your browser
 
-> **Note on the API:** This tool uses Substack's internal API, which is unofficial and undocumented. It works as of the time of writing but could break if Substack changes their API. No data is sent anywhere — everything stays on your machine.
-
 ---
 
 ## Setup
 
-### 1. Install dependencies
+**Recommended: use Claude Code to walk you through setup.** Once you've cloned the repo and set your session cookie, Claude can look up your account details and configure everything automatically. See step 3.
+
+### 1. Clone the repo
 
 ```bash
+git clone https://github.com/alyssafuward/substack-replies.git
+cd substack-replies
 pip install -r requirements.txt
 ```
 
-### 2. Create your config file
-
-Copy `config.example.py` to `config.py` and fill in your values:
-
-```bash
-cp config.example.py config.py
-```
-
-Then open `config.py` and set:
-
-- **`USER_ID`** — your numeric Substack user ID
-- **`HANDLE`** — your Substack handle (e.g. `janedoe`)
-- **`OWN_PUBS`** — a dict of your publications: `{"yourhandle": pub_id, ...}`
-
-**How to find your USER_ID and publication IDs:**
-
-1. Open [substack.com](https://substack.com) and log in
-2. Open DevTools (Cmd+Option+I on Mac) → **Network** tab
-3. Reload the page and look for a request to `/api/v1/subscriber` or `/api/v1/activity-feed-web`
-4. In the response JSON, your `user_id` and publication `id` values will be visible
-
-> **Security note:** `config.py` is gitignored and never committed. It contains your user ID and publication IDs — these are public Substack identifiers, but there's no reason to expose them in a public repo.
-
-### 3. Set your session cookie
+### 2. Set your session cookie
 
 You need your `substack.sid` session cookie to authenticate API requests.
 
@@ -63,7 +44,27 @@ echo 'export SUBSTACK_SID="paste-your-value-here"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-> **Security note:** The cookie is a live session credential — anyone who has it can act as you on Substack. It's stored in `~/.zshrc` on disk, readable by anything running as your user. It is never written to this repo or committed to git. If you think it's been exposed, log out of Substack to invalidate it, then repeat the steps above with the new cookie value. **Never paste the cookie value into chat** (including to Claude) — conversation content is sent to Anthropic's servers.
+> **Security note:** The cookie is a live session credential — anyone who has it can act as you on Substack. It's stored in `~/.zshrc` on disk, readable by anything running as your user. It is never written to this repo or committed to git. If you think it's been exposed, log out of Substack to invalidate it and repeat the steps above with the new value. **Never paste the cookie value into chat** (including to Claude) — conversation content is sent to Anthropic's servers.
+
+### 3. Create your config file
+
+Copy `config.example.py` to `config.py`:
+
+```bash
+cp config.example.py config.py
+```
+
+`config.py` needs three values: your numeric user ID, your handle, and a dict of your publication subdomains and their IDs.
+
+**The easiest way to fill this in:** open Claude Code in this directory and say *"help me set up my config."* Claude can look up your account details automatically using your session cookie — no manual digging required.
+
+**To find the values yourself** (if not using Claude):
+1. Open [substack.com](https://substack.com) and log in
+2. Open DevTools → **Network** tab → reload the page
+3. Look for a request to `/api/v1/subscriber` — the response JSON contains your `user_id`
+4. For publication IDs, look for requests to `/api/v1/posts` — the publication `id` is in the response
+
+> **Security note:** `config.py` is gitignored and never committed. It contains your user ID and publication IDs — these are public Substack identifiers, but there's no reason to expose them in a public repo.
 
 ---
 
@@ -75,16 +76,13 @@ python scraper.py sync
 
 # Generate the dashboard and open it in your browser
 python dashboard.py
-
-# Generate without auto-opening
-python dashboard.py --no-open
 ```
 
 The dashboard shows:
-- Replies to your notes and comments that you haven't responded to yet
+- Replies to your notes and comments that haven't been addressed yet
 - Comments on your own posts that are waiting for a reply
-- A "Liked / reviewed" section for items you've already engaged with
-- A "Done" section to track what you've handled
+- A "Show liked comments" toggle for items you've already engaged with
+- A "Done" section to track what you've handled this session
 
 ---
 
