@@ -1,0 +1,8 @@
+replies.db
+.env
+*.json
+__pycache__/
+*.pyc
+report.html
+.DS_Store
+conversation.md
