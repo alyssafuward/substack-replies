@@ -85,8 +85,9 @@ Once the cookie is set, Claude will run your first sync and open the dashboard.
 Once set up, whenever you want to check your replies:
 
 1. Open Terminal
-2. Type `claude` and press Enter
-3. Say: *"sync my Substack replies and open the dashboard"*
+2. Navigate to your Substack Replies folder (e.g. `cd ~/src/substack-replies`)
+3. Type `claude` and press Enter
+4. Say: *"sync my Substack replies and open the dashboard"*
 
 ---
 

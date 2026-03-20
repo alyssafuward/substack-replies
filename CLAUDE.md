@@ -87,6 +87,8 @@ OWN_PUBS = {
 
 Then run `python check.py` to confirm everything works.
 
+**The database (`replies.db`) is created automatically** the first time you run `python scraper.py sync` — no manual setup needed. It stores all activity items, comments, and posts locally. It is gitignored and never committed.
+
 ---
 
 ## Common tasks
