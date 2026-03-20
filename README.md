@@ -18,18 +18,18 @@ See [SETUP.md](SETUP.md) for step-by-step instructions. The recommended way to s
 
 ## How it works
 
-1. Authenticates with Substack using your session cookie
-2. Fetches your activity feed (note replies, comment replies) and all comments on your own posts
-3. Stores everything in a local SQLite database on your computer
-4. Generates a dashboard you open in your browser
+1. Connects to Substack on your behalf using a session cookie — a temporary key your browser already uses to keep you logged in
+2. Fetches your recent replies, note responses, and comments on your own posts
+3. Saves everything locally on your computer
+4. Generates a dashboard you open in your browser to review and track what needs a response
 
 ---
 
 ## Running the tool
 
-**If you're using Claude Code** (recommended), just open Terminal, type `claude`, and say: *"sync my Substack replies and open the dashboard."* Claude handles the rest.
+**If you're using Claude Code** (recommended), after you've completed setup: open Terminal, navigate to your Substack Replies folder, type `claude`, and say: *"sync my Substack replies and open the dashboard."* Claude handles the rest.
 
-**If you're running it manually:**
+**If you're running it manually** (for developers): open Terminal, navigate to the repo folder, and run:
 
 ```bash
 # Fetch latest replies and comments
