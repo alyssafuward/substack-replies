@@ -1,16 +1,26 @@
 # Setting Up Substack Replies
 
+Substack Replies is a local tool that pulls all your Substack replies and comments into a single dashboard so you can track which ones need a response. This guide walks you through getting it running on your computer. You don't need to be a developer — Claude Code will handle the technical parts for you.
+
+---
+
 ## What you'll need
 
 - A Mac or PC
 - A Substack account
-- Claude Code installed — [claude.ai/code](https://claude.ai/code)
+- About 10-15 minutes
 
 ---
 
-## Steps
+## Step 1: Install Claude Code
 
-### 1. Open Terminal and start Claude Code
+Claude Code is an AI assistant that runs in your Terminal. It will set up and run this tool for you — you just tell it what you want in plain language.
+
+Follow the official installation instructions at: **[claude.ai/code](https://claude.ai/code)**
+
+---
+
+## Step 2: Open Terminal and start Claude Code
 
 **On Mac:** Press Cmd+Space, type "Terminal", hit Enter. Then type:
 
@@ -18,7 +28,11 @@
 claude
 ```
 
-### 2. Tell Claude to set up Substack Replies
+You're now talking to Claude. Everything from here you can do in plain language.
+
+---
+
+## Step 3: Tell Claude to set up Substack Replies
 
 Paste this into the Claude conversation:
 
@@ -26,28 +40,47 @@ Paste this into the Claude conversation:
 >
 > Can you clone it, install anything that's needed, and walk me through the setup?
 
-Claude will handle the rest — cloning the repo, installing dependencies, setting up your Substack config, and running your first sync.
+Claude will:
+- Download the tool to your computer
+- Install anything that's missing
+- Walk you through getting your Substack session cookie
+- Set up your personal Substack config (a small file that tells the tool your Substack handle and publications)
+- Run your first sync and open the dashboard
 
-### 3. Get your Substack session cookie
+---
 
-When Claude asks for your session cookie:
+## Step 4: Get your Substack session cookie
+
+When Claude asks for your session cookie, this is how the tool authenticates with Substack on your behalf.
 
 1. Open [substack.com](https://substack.com) logged in
 2. Press **Cmd+Option+I** → **Application** tab → **Cookies** → **https://substack.com**
 3. Find `substack.sid` and copy the value
 
-Follow Claude's instructions for where to put it. **Do not paste the cookie value into the chat** — run the command Claude gives you directly in Terminal instead.
+**Important:** Claude will give you a command to run in Terminal — run that, don't paste the cookie value into the chat. The cookie is a live credential and chat messages are sent to Anthropic's servers.
 
 ---
 
 ## Ongoing use
 
-Open Terminal, type `claude`, then say: *"sync my Substack replies and open the dashboard."*
+Once set up, whenever you want to check your replies:
+
+1. Open Terminal
+2. Type `claude` and press Enter
+3. Say: *"sync my Substack replies and open the dashboard"*
+
+---
+
+## Troubleshooting
+
+If anything goes wrong, just tell Claude what happened — it can diagnose and fix most issues.
+
+If your dashboard stops working after a while, your session cookie may have expired. Get a fresh one from your browser using the same steps above and tell Claude to update it.
 
 ---
 
 ## Privacy
 
-- Your data stays on your computer — nothing is sent to any server
-- The tool only reads from Substack, it never posts or modifies anything on your behalf
-- If your dashboard stops working, your session cookie may have expired — get a fresh one from your browser using the same steps above
+- Your data never leaves your computer
+- The session cookie is stored locally — never in the repo or sent anywhere
+- This tool only reads from Substack — it never posts, likes, or modifies anything on your behalf
