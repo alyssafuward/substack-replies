@@ -76,7 +76,7 @@ To get your cookie:
 
 Follow Claude's instructions for where to put it — it will give you a command to run directly in Terminal.
 
-Once the cookie is set, Claude will run your first sync and open the dashboard.
+Once the cookie is set, Claude will run your first sync and open the dashboard. Note that building the database for the first time can take several minutes — this is normal. Subsequent syncs will be much faster.
 
 ---
 
