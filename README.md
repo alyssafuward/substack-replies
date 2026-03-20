@@ -14,8 +14,6 @@ Built for Substack writers who publish across multiple publications and want a p
 
 See [SETUP.md](SETUP.md) for step-by-step instructions. The recommended way to set this up is using Claude Code — it will walk you through everything in plain language, no technical experience required.
 
-If you're a developer and prefer to set it up manually, the setup guide includes a section for that too.
-
 ---
 
 ## How it works
