@@ -22,6 +22,10 @@ Follow the official installation instructions at: **[claude.ai/code](https://cla
 
 ## Step 2: Open Terminal and start Claude Code
 
+Terminal is a text-based interface on your computer where you can run programs by typing commands. It looks plain but it's powerful — and in this case, you'll mostly be using it to talk to Claude, not type commands yourself.
+
+> **A note on safety:** Claude Code will ask your permission before running anything on your computer. If it ever asks to do something unexpected or outside of setting up this tool, you can say no and ask it to explain first.
+
 **On Mac:** Press Cmd+Space, type "Terminal", hit Enter. Then type:
 
 ```
