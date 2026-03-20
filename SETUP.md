@@ -65,14 +65,16 @@ Before it can sync your replies, it will need your session cookie to authenticat
 
 ## Step 4: Get your Substack session cookie
 
-Your session cookie is how the tool proves to Substack that it's you. Claude will ask you for it during setup.
+Your session cookie is how the tool proves to Substack that it's you. **Treat your session cookie like a password.** While it's active, anyone who has it can make changes to your Substack account as though they're you. It resets when you log out and back in. Do not share it with anyone — including by pasting it into Claude Code chat. Claude Code will direct you on how to set it up safely.
+
+To get your cookie:
 
 1. Open [substack.com](https://substack.com) logged in
 2. Press **Cmd+Option+I** to open Developer Tools
 3. Click the **Application** tab → **Cookies** → **https://substack.com**
 4. Find the row named `substack.sid` and copy the value
 
-**Important:** Claude will give you a command to run in Terminal — run that, don't paste the cookie value into the chat. The cookie is a live credential and chat messages are sent to Anthropic's servers.
+Follow Claude's instructions for where to put it — it will give you a command to run directly in Terminal.
 
 Once the cookie is set, Claude will run your first sync and open the dashboard.
 
