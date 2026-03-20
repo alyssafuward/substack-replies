@@ -46,7 +46,7 @@ Claude will:
 - Clone the repo to your computer
 - Install Python and Git if you don't have them
 - Walk you through getting your Substack session cookie
-- Set up your personal config (a small file that tells the tool who you are — your Substack handle and which publications you own)
+- Set up your personal Substack config (a small file that tells the tool your Substack handle and publications)
 - Run your first sync and open the dashboard
 
 ---
