@@ -103,3 +103,11 @@ If your dashboard stops working after a while, your session cookie may have expi
 - Your data never leaves your computer
 - The session cookie is stored locally — never in the repo or sent anywhere
 - This tool only reads from Substack — it never posts, likes, or modifies anything on your behalf
+
+---
+
+## A note on maintenance
+
+This tool was built as a personal project and a demonstration of what's possible when coding with Claude Code. It solves a specific problem for a specific person — and it's shared here in case it's useful or instructive to others.
+
+It is not actively maintained. It may break if Substack changes their internal API, and there's no guarantee of updates or support. If you run into issues, Claude Code can help you debug and adapt it — that's part of the spirit of how it was built.
