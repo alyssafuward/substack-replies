@@ -18,7 +18,7 @@ See [SETUP.md](SETUP.md) for step-by-step instructions. The recommended way to s
 
 ## How it works
 
-1. Connects to Substack on your behalf using a session cookie — a temporary key your browser already uses to keep you logged in
+1. Connects to Substack on your behalf using a session cookie — a temporary key your browser already uses to keep you logged in. Treat it like a password and don't share it with anyone.
 2. Fetches your recent replies, note responses, and comments on your own posts
 3. Saves everything locally on your computer
 4. Generates a dashboard you open in your browser to review and track what needs a response
