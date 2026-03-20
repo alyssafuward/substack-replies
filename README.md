@@ -12,7 +12,9 @@ Built for Substack writers who publish across multiple publications and want a p
 
 ## Getting started
 
-See [SETUP.md](SETUP.md) for step-by-step installation instructions.
+See [SETUP.md](SETUP.md) for step-by-step instructions. The recommended way to set this up is using Claude Code — it will walk you through everything in plain language, no technical experience required.
+
+If you're a developer and prefer to set it up manually, the setup guide includes a section for that too.
 
 ---
 
@@ -20,12 +22,16 @@ See [SETUP.md](SETUP.md) for step-by-step installation instructions.
 
 1. Authenticates with Substack using your session cookie
 2. Fetches your activity feed (note replies, comment replies) and all comments on your own posts
-3. Stores everything in a local SQLite database (`replies.db`)
-4. Generates a self-contained HTML dashboard you open in your browser
+3. Stores everything in a local SQLite database on your computer
+4. Generates a dashboard you open in your browser
 
 ---
 
-## Usage
+## Running the tool
+
+**If you're using Claude Code** (recommended), just open Terminal, type `claude`, and say: *"sync my Substack replies and open the dashboard."* Claude handles the rest.
+
+**If you're running it manually:**
 
 ```bash
 # Fetch latest replies and comments
