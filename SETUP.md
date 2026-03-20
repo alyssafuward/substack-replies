@@ -56,21 +56,25 @@ Paste this into the Claude conversation:
 Claude will:
 - Download the tool to your computer
 - Install anything that's missing
-- Walk you through getting your Substack session cookie
+- Ask for your Substack session cookie (see Step 4)
 - Set up your personal Substack config (a small file that tells the tool your Substack handle and publications)
-- Run your first sync and open the dashboard
+
+Before it can sync your replies, it will need your session cookie to authenticate with Substack on your behalf. Claude will prompt you for this — that's Step 4.
 
 ---
 
 ## Step 4: Get your Substack session cookie
 
-When Claude asks for your session cookie, this is how the tool authenticates with Substack on your behalf.
+Your session cookie is how the tool proves to Substack that it's you. Claude will ask you for it during setup.
 
 1. Open [substack.com](https://substack.com) logged in
-2. Press **Cmd+Option+I** → **Application** tab → **Cookies** → **https://substack.com**
-3. Find `substack.sid` and copy the value
+2. Press **Cmd+Option+I** to open Developer Tools
+3. Click the **Application** tab → **Cookies** → **https://substack.com**
+4. Find the row named `substack.sid` and copy the value
 
 **Important:** Claude will give you a command to run in Terminal — run that, don't paste the cookie value into the chat. The cookie is a live credential and chat messages are sent to Anthropic's servers.
+
+Once the cookie is set, Claude will run your first sync and open the dashboard.
 
 ---
 
