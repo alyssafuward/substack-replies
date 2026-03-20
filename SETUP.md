@@ -22,7 +22,7 @@ Follow the official installation instructions at: **[claude.ai/code](https://cla
 
 ## Step 2: Open Terminal and start Claude Code
 
-Terminal is a text-based interface that lets you interact directly with your computer by running commands. Unlike clicking buttons in an app, commands in Terminal can make real changes to your computer — installing software, creating files, and so on.
+Terminal is a text-based interface that lets you interact directly with your computer by running commands. Commands in Terminal can make real changes to your computer — installing software, creating files, and so on.
 
 Claude Code runs inside Terminal and issues these commands on your behalf. Before running anything, it should show you what it's about to do and ask for your permission.
 
