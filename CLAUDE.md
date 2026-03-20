@@ -99,6 +99,8 @@ Then run `python check.py` to confirm everything works.
 source ~/.zshrc && python scraper.py sync
 ```
 
+> **First sync:** Warn the user that the initial database build can take several minutes. This is normal — subsequent syncs will be much faster.
+
 **Open the dashboard:**
 ```bash
 python dashboard.py
