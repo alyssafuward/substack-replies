@@ -23,11 +23,12 @@ echo $SUBSTACK_SID
 
 **Never ask the user to paste the cookie value into chat.** It's a live credential and conversation content is sent to Anthropic's servers. Always tell them to run the export command directly in their terminal.
 
-How to get the cookie:
-1. Open [substack.com](https://substack.com) in their browser, make sure they're logged in
+If the cookie is missing, share these instructions with the user:
+
+1. Open [substack.com](https://substack.com) in their browser and make sure they're logged in
 2. Open DevTools: Cmd+Option+I → Application tab → Cookies → substack.com
-3. Find `substack.sid`, copy the value
-4. Run in terminal: `echo 'export SUBSTACK_SID="paste-value-here"' >> ~/.zshrc && source ~/.zshrc`
+3. Find `substack.sid` and copy the value
+4. Run this command directly in Terminal (do not paste the value into chat): `echo 'export SUBSTACK_SID="paste-value-here"' >> ~/.zshrc && source ~/.zshrc`
 
 **Step 2: Check for config.py**
 
