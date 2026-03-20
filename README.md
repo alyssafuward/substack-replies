@@ -1,10 +1,25 @@
 # substack-replies
 
-A personal tool that scrapes your Substack replies and surfaces them in a local HTML dashboard so you can track which ones need a response.
+Substack's notification inbox is hard to work with — replies get buried, threads are hard to follow, and it's easy to miss comments that deserve a response.
 
-Built for writers who publish on multiple Substack publications and want a single inbox view across all of them.
+This tool pulls all your replies and comments into a single local dashboard so you can see everything in one place, mark items done, and actually keep up.
 
-> **Note on the API:** This tool uses Substack's internal API, which is unofficial and undocumented. It works as of the time of writing but could break if Substack changes their API. No data is sent anywhere — everything stays on your machine.
+Built for Substack writers who publish across multiple publications and want a proper inbox, not a notification feed.
+
+> **Note:** This tool uses Substack's internal API, which is unofficial and undocumented. It works as of the time of writing but could break if Substack changes their API. Everything runs locally — no data is sent anywhere, no accounts, no servers.
+
+---
+
+## The easiest way to get started
+
+**Use Claude Code.** Clone the repo, open it in Claude Code, and just say what you want — Claude will walk you through setup, find your account details automatically, and get you to a working dashboard without you having to touch a config file.
+
+```bash
+git clone https://github.com/alyssafuward/substack-replies.git
+cd substack-replies
+```
+
+Then open the folder in Claude Code and say: *"help me set up Substack replies."*
 
 ---
 
@@ -17,11 +32,9 @@ Built for writers who publish on multiple Substack publications and want a singl
 
 ---
 
-## Setup
+## Manual setup (without Claude Code)
 
-**Recommended: use Claude Code to walk you through setup.** Once you've cloned the repo and set your session cookie, Claude can look up your account details and configure everything automatically. See step 3.
-
-### 1. Clone the repo
+### 1. Clone the repo (if you haven't already)
 
 ```bash
 git clone https://github.com/alyssafuward/substack-replies.git
