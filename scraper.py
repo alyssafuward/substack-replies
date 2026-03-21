@@ -56,10 +56,8 @@ def get(url, params=None, retries=4):
             time.sleep(5)
             continue
         if resp.status_code == 429:
-            wait = 60 * (attempt + 1)
-            print(f"  Rate limited, waiting {wait}s...")
-            time.sleep(wait)
-            continue
+            print("RATE_LIMITED")
+            sys.exit(2)
         if resp.status_code >= 500:
             if attempt == retries - 1:
                 resp.raise_for_status()
