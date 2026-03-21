@@ -181,8 +181,22 @@ def load_stats(conn):
         "activity_items": activity_count,
         "comments": comment_count,
         "posts": post_count,
-        "last_sync": (last_sync[0] or "")[:16].replace("T", " ") if last_sync else "never",
+        "last_sync": _format_last_sync(last_sync[0] if last_sync else None),
     }
+
+
+def _format_last_sync(ts):
+    if not ts:
+        return "never"
+    try:
+        from datetime import timezone, timedelta
+        import time as _time
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        offset = -_time.timezone if not _time.daylight else -_time.altzone
+        local = dt.astimezone(timezone(timedelta(seconds=offset)))
+        return local.strftime("%-m/%-d/%y %-I:%M %p")
+    except Exception:
+        return ts[:16].replace("T", " ")
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 

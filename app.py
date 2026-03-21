@@ -185,6 +185,7 @@ def sync():
             text = line.rstrip()
             if text == "RATE_LIMITED":
                 rate_limited = True
+                yield f"data: Too many requests to Substack — wait a few minutes and try again.\n\n"
             else:
                 yield f"data: {text}\n\n"
         proc.wait()
