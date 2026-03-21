@@ -126,7 +126,7 @@ def init_db(conn):
 
 # ── Activity Feed Sync ────────────────────────────────────────────────────────
 
-def sync_activity_feed(conn, days=60):
+def sync_activity_feed(conn, days=60, target=100):
     """Paginate through activity-feed-web and store all items up to `days` old."""
     url = "https://substack.com/api/v1/activity-feed-web"
     after = None
@@ -145,14 +145,16 @@ def sync_activity_feed(conn, days=60):
         if not items:
             break
 
+        print(f"  [activity] page {pages+1}: fetched {len(items)} items (total stored: {total})", flush=True)
         new_this_page = 0
         for item in items:
             # Stop if older than cutoff
             item_ts = item.get("updated_at") or item.get("created_at") or ""
             if item_ts and item_ts < cutoff:
                 conn.commit()
-                print(f"  Activity feed: {total} new items ({pages+1} pages, reached {days}-day cutoff)")
-                return total
+                unanswered = count_unanswered_activity(conn)
+                print(f"  Activity feed: {total} new items ({pages+1} pages, reached {days}-day cutoff), {unanswered} unanswered")
+                return unanswered
 
             existing = conn.execute(
                 "SELECT id FROM activity_items WHERE id=?", (item["id"],)
@@ -198,6 +200,13 @@ def sync_activity_feed(conn, days=60):
             break
 
         conn.commit()  # save progress after each page
+
+        unanswered = count_unanswered_activity(conn)
+        print(f"    {unanswered} unanswered activity replies so far", flush=True)
+        if unanswered >= target:
+            print(f"  Reached target of {target} unanswered activity replies — stopping feed sync")
+            return unanswered
+
         time.sleep(2)  # be polite
 
         # Pagination: use min(updated_at) - 1ms
@@ -210,8 +219,9 @@ def sync_activity_feed(conn, days=60):
         after = (dt - timedelta(milliseconds=1)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     conn.commit()
-    print(f"  Activity feed: {total} new items ({pages} pages)")
-    return total
+    unanswered = count_unanswered_activity(conn)
+    print(f"  Activity feed: {total} new items ({pages} pages), {unanswered} unanswered")
+    return unanswered
 
 
 def _store_comment(conn, c, pub_subdomain, post_id, post_title, post_url):
@@ -246,6 +256,21 @@ def _parent_id(ancestor_path):
 
 # ── Own Publication Sync ──────────────────────────────────────────────────────
 
+def count_unanswered_activity(conn):
+    """Count unanswered replies from the activity feed."""
+    return conn.execute("""
+        SELECT COUNT(*) FROM activity_items a
+        WHERE a.type IN ('note_reply', 'comment_reply')
+          AND a.comment_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM comments r
+              WHERE r.user_id = ?
+                AND r.ancestor_path LIKE '%' || a.comment_id || '%'
+                AND r.id > a.comment_id
+          )
+    """, (USER_ID,)).fetchone()[0]
+
+
 def count_unanswered_own(conn):
     """Approximate count of unanswered comments on own pub posts."""
     return conn.execute("""
@@ -263,12 +288,12 @@ def count_unanswered_own(conn):
     """, (USER_ID, USER_ID)).fetchone()[0]
 
 
-def sync_own_pubs(conn, target=100):
+def sync_own_pubs(conn, target=100, already_found=0):
     """Scrape comments on posts from own publications.
 
     Fetches newest posts first. Skips posts whose comment_count hasn't changed
-    since the last sync. Stops extending into older posts once the number of
-    unanswered comments across all own pubs reaches `target`.
+    since the last sync. Stops extending into older posts once the total number of
+    unanswered replies (activity + own pubs) reaches `target`.
     """
     total_comments = 0
 
@@ -283,7 +308,9 @@ def sync_own_pubs(conn, target=100):
         prev_depth = int(row[0]) if row else 0
         new_depth = prev_depth
 
+        print(f"  Fetching post list for {subdomain}...", flush=True)
         all_posts = fetch_all_posts(subdomain)
+        print(f"  {len(all_posts)} posts found", flush=True)
         fetched_this_run = 0
 
         for i, post in enumerate(all_posts):
@@ -307,17 +334,24 @@ def sync_own_pubs(conn, target=100):
 
             # Skip posts we've already synced where nothing changed
             if already_synced and count_unchanged:
+                print(f"    [{i+1}/{len(all_posts)}] skip (unchanged): {post_title[:60]}", flush=True)
+                continue
+
+            # Skip posts with no comments — nothing to fetch
+            if api_count == 0:
+                print(f"    [{i+1}/{len(all_posts)}] skip (0 comments): {post_title[:60]}", flush=True)
                 continue
 
             # For posts beyond our previous watermark, check if target is reached
             if i >= prev_depth:
-                unanswered = count_unanswered_own(conn)
+                unanswered = already_found + count_unanswered_own(conn)
                 if unanswered >= target:
                     print(f"    Reached target of {target} unanswered — stopping at post {i + 1}/{len(all_posts)}")
                     break
                 new_depth = i + 1
 
             # Fetch comments for this post
+            print(f"    [{i+1}/{len(all_posts)}] fetching: {post_title[:60]} ({api_count} comments)", flush=True)
             time.sleep(1)
             comments = fetch_post_comments(subdomain, post_id)
             for c in flatten_comments(comments):
@@ -571,8 +605,8 @@ def main():
 
         if "sync" in args:
             print(f"Syncing (last {days} days, target {target} unanswered)...")
-            sync_activity_feed(conn, days=days)
-            sync_own_pubs(conn, target=target)
+            activity_unanswered = sync_activity_feed(conn, days=days, target=target)
+            sync_own_pubs(conn, target=target, already_found=activity_unanswered)
             backfill_post_urls(conn)
             conn.execute("INSERT INTO sync_log VALUES (?,?,?)",
                          (datetime.now(timezone.utc).isoformat(), "full", 0))
