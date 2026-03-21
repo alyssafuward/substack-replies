@@ -41,8 +41,8 @@ def load_thread(conn, reply_id):
     return [{"name": by_id[i][1] or "?", "body": by_id[i][2] or ""} for i in ancestor_ids if i in by_id]
 
 
-def load_data(conn):
-    """Return list of dicts representing replies needing response."""
+def load_data(conn, limit=100):
+    """Return (items, total) where items is capped at limit, total is full count."""
     results = []
 
     # 1. Note/comment replies from activity feed
@@ -167,7 +167,8 @@ def load_data(conn):
             "thread": thread,
         })
 
-    return results
+    total = len(results)
+    return results[:limit], total
 
 
 def load_stats(conn):
@@ -280,7 +281,7 @@ def render_card(item, section="action"):
     </div>
     """
 
-def render_html(items, stats):
+def render_html(items, stats, total=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     needs_response = [i for i in items if not i.get("liked")]
@@ -292,6 +293,12 @@ def render_html(items, stats):
     count = len(needs_response)
     reviewed_count = len(reviewed)
     empty_msg = "" if count else '<div class="empty">🎉 All caught up!</div>'
+
+    total = total or (count + reviewed_count)
+    showing_note = ""
+    if total > count + reviewed_count:
+        hidden = total - count - reviewed_count
+        showing_note = f'<div class="showing-note">Showing {count + reviewed_count} of {total} unanswered — <strong>{hidden} older</strong> not shown. Run sync to load more, or use <code>--target N</code> to expand.</div>'
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -406,6 +413,13 @@ def render_html(items, stats):
     }}
     .how-it-works h3 {{ font-size: 0.78rem; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 4px; }}
     .how-it-works h3:first-child {{ margin-top: 0; }}
+    .showing-note {{
+      max-width: 720px; margin: -8px auto 16px;
+      font-size: 0.82rem; color: #888;
+      padding: 8px 14px; background: #fffbf5;
+      border-radius: 6px; border: 1px solid #ffe5c0;
+    }}
+    .showing-note code {{ font-size: 0.78rem; background: #f0f0f0; padding: 1px 5px; border-radius: 3px; }}
     .liked-section {{ display: none; margin-top: 10px; }}
     .liked-section .card {{ opacity: 0.55; background: #fafafa; }}
     .liked-section .card:hover {{ opacity: 0.8; }}
@@ -443,6 +457,8 @@ def render_html(items, stats):
   <div class="count-banner {'zero' if count == 0 else ''}" id="banner">
     {"🎉 All caught up!" if count == 0 else f"⚡ <span id='remaining'>{count}</span> {'reply' if count == 1 else 'replies'} need your response"}
   </div>
+
+  {showing_note}
 
   <div class="cards" id="action-cards">
     {action_cards}
@@ -599,14 +615,22 @@ def main():
         print("No data found. Run: python scraper.py sync")
         sys.exit(1)
 
+    limit = 100
+    for i, arg in enumerate(sys.argv[1:]):
+        if arg == "--limit" and i + 2 < len(sys.argv):
+            limit = int(sys.argv[i + 2])
+
     with sqlite3.connect(DB_PATH) as conn:
-        items = load_data(conn)
+        items, total = load_data(conn, limit=limit)
         stats = load_stats(conn)
 
-    html = render_html(items, stats)
+    html = render_html(items, stats, total=total)
     OUT_PATH.write_text(html, encoding="utf-8")
     print(f"Report generated: {OUT_PATH}")
-    print(f"Found {len(items)} replies needing response.")
+    if total > len(items):
+        print(f"Found {total} replies needing response (showing {len(items)}).")
+    else:
+        print(f"Found {len(items)} replies needing response.")
 
     if "--no-open" not in sys.argv:
         webbrowser.open(f"file://{OUT_PATH.resolve()}")

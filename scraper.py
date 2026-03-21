@@ -116,6 +116,11 @@ def init_db(conn):
             type TEXT,
             items_fetched INTEGER
         );
+
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
     """)
     conn.commit()
 
@@ -241,34 +246,92 @@ def _parent_id(ancestor_path):
 
 # ── Own Publication Sync ──────────────────────────────────────────────────────
 
-def sync_own_pubs(conn):
-    """Scrape comments on all posts from own publications."""
+def count_unanswered_own(conn):
+    """Approximate count of unanswered comments on own pub posts."""
+    return conn.execute("""
+        SELECT COUNT(*) FROM comments c
+        WHERE c.pub_subdomain IS NOT NULL
+          AND c.user_id != ?
+          AND c.user_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM comments r
+              WHERE r.user_id = ?
+                AND (r.ancestor_path = CAST(c.id AS TEXT)
+                     OR r.ancestor_path LIKE '%.' || c.id
+                     OR r.ancestor_path LIKE '%.' || c.id || '.%')
+          )
+    """, (USER_ID, USER_ID)).fetchone()[0]
+
+
+def sync_own_pubs(conn, target=100):
+    """Scrape comments on posts from own publications.
+
+    Fetches newest posts first. Skips posts whose comment_count hasn't changed
+    since the last sync. Stops extending into older posts once the number of
+    unanswered comments across all own pubs reaches `target`.
+    """
     total_comments = 0
 
     for subdomain in OWN_PUBS:
         print(f"  Syncing {subdomain}...")
-        posts = fetch_all_posts(subdomain)
 
-        for post in posts:
+        # Load watermark: how many posts deep we've previously synced
+        row = conn.execute(
+            "SELECT value FROM sync_state WHERE key=?",
+            (f"own_pubs_{subdomain}_depth",)
+        ).fetchone()
+        prev_depth = int(row[0]) if row else 0
+        new_depth = prev_depth
+
+        all_posts = fetch_all_posts(subdomain)
+        fetched_this_run = 0
+
+        for i, post in enumerate(all_posts):
             post_id = post["id"]
+            api_count = post.get("comment_count", 0)
             post_title = post.get("title", "")
             post_url = post.get("canonical_url", f"https://{subdomain}.substack.com/p/{post.get('slug','')}")
 
-            # Store post
+            # Check old state before upserting
+            old_row = conn.execute(
+                "SELECT comment_count FROM posts WHERE id=?", (post_id,)
+            ).fetchone()
+            already_synced = old_row is not None and i < prev_depth
+            count_unchanged = old_row is not None and old_row[0] == api_count
+
+            # Always update post metadata
             conn.execute("""
                 INSERT OR REPLACE INTO posts (id, pub_subdomain, title, slug, canonical_url, post_date, comment_count)
                 VALUES (?,?,?,?,?,?,?)
-            """, (post_id, subdomain, post_title, post.get("slug"), post_url, post.get("post_date"), post.get("comment_count", 0)))
+            """, (post_id, subdomain, post_title, post.get("slug"), post_url, post.get("post_date"), api_count))
 
+            # Skip posts we've already synced where nothing changed
+            if already_synced and count_unchanged:
+                continue
+
+            # For posts beyond our previous watermark, check if target is reached
+            if i >= prev_depth:
+                unanswered = count_unanswered_own(conn)
+                if unanswered >= target:
+                    print(f"    Reached target of {target} unanswered — stopping at post {i + 1}/{len(all_posts)}")
+                    break
+                new_depth = i + 1
+
+            # Fetch comments for this post
             time.sleep(1)
-            # Fetch and store comments
             comments = fetch_post_comments(subdomain, post_id)
             for c in flatten_comments(comments):
                 _store_comment(conn, c, pub_subdomain=subdomain, post_id=post_id, post_title=post_title, post_url=post_url)
                 total_comments += 1
+            fetched_this_run += 1
 
+        # Save updated watermark
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)",
+            (f"own_pubs_{subdomain}_depth", str(new_depth))
+        )
         conn.commit()
-        print(f"    {subdomain}: {len(posts)} posts, {total_comments} total comments")
+        print(f"    {subdomain}: {new_depth}/{len(all_posts)} posts synced depth, {fetched_this_run} refreshed this run")
 
     return total_comments
 
@@ -497,16 +560,19 @@ def main():
     with sqlite3.connect(DB_PATH) as conn:
         init_db(conn)
 
-        # Parse --days N (default 60)
+        # Parse --days N (default 60) and --target N (default 100)
         days = 60
+        target = 100
         for i, arg in enumerate(sys.argv[1:]):
             if arg == "--days" and i + 2 < len(sys.argv):
                 days = int(sys.argv[i + 2])
+            if arg == "--target" and i + 2 < len(sys.argv):
+                target = int(sys.argv[i + 2])
 
         if "sync" in args:
-            print(f"Syncing (last {days} days)...")
+            print(f"Syncing (last {days} days, target {target} unanswered)...")
             sync_activity_feed(conn, days=days)
-            sync_own_pubs(conn)
+            sync_own_pubs(conn, target=target)
             backfill_post_urls(conn)
             conn.execute("INSERT INTO sync_log VALUES (?,?,?)",
                          (datetime.now(timezone.utc).isoformat(), "full", 0))
