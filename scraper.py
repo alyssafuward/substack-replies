@@ -34,6 +34,9 @@ REPLY_TYPES = {"note_reply", "comment_reply", "new_comment"}
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
 
+def ts():
+    return datetime.now().strftime("[%H:%M:%S]")
+
 def get_headers():
     sid = os.environ.get("SUBSTACK_SID", "")
     if not sid:
@@ -82,6 +85,7 @@ def init_db(conn):
             target_comment_id INTEGER, -- your comment that was replied to
             target_post_id INTEGER,
             is_new INTEGER,
+            is_responded INTEGER DEFAULT 0,
             raw_json TEXT
         );
 
@@ -116,7 +120,19 @@ def init_db(conn):
             type TEXT,
             items_fetched INTEGER
         );
+
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
     """)
+
+    # Migrate existing DB: add is_responded if it doesn't exist yet
+    try:
+        conn.execute("ALTER TABLE activity_items ADD COLUMN is_responded INTEGER DEFAULT 0")
+    except Exception:
+        pass  # column already exists
+
     conn.commit()
 
 # ── Activity Feed Sync ────────────────────────────────────────────────────────
@@ -146,7 +162,7 @@ def sync_activity_feed(conn, days=60):
             item_ts = item.get("updated_at") or item.get("created_at") or ""
             if item_ts and item_ts < cutoff:
                 conn.commit()
-                print(f"  Activity feed: {total} new items ({pages+1} pages, reached {days}-day cutoff)")
+                print(f"{ts()}  Activity feed: {total} new items ({pages+1} pages, reached {days}-day cutoff)")
                 return total
 
             existing = conn.execute(
@@ -205,7 +221,7 @@ def sync_activity_feed(conn, days=60):
         after = (dt - timedelta(milliseconds=1)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     conn.commit()
-    print(f"  Activity feed: {total} new items ({pages} pages)")
+    print(f"{ts()}  Activity feed: {total} new items ({pages} pages)")
     return total
 
 
@@ -246,7 +262,7 @@ def sync_own_pubs(conn):
     total_comments = 0
 
     for subdomain in OWN_PUBS:
-        print(f"  Syncing {subdomain}...")
+        print(f"{ts()}  Syncing {subdomain}...")
         posts = fetch_all_posts(subdomain)
 
         for post in posts:
@@ -268,7 +284,7 @@ def sync_own_pubs(conn):
                 total_comments += 1
 
         conn.commit()
-        print(f"    {subdomain}: {len(posts)} posts, {total_comments} total comments")
+        print(f"{ts()}    {subdomain}: {len(posts)} posts, {total_comments} total comments")
 
     return total_comments
 
@@ -281,10 +297,10 @@ def backfill_post_urls(conn):
     """).fetchall()
 
     if not rows:
-        print("  No missing post URLs to backfill.")
+        print(f"{ts()}  No missing post URLs to backfill.")
         return
 
-    print(f"  Backfilling URLs for {len(rows)} posts...")
+    print(f"{ts()}  Backfilling URLs for {len(rows)} posts...")
     for (post_id,) in rows:
         try:
             data = get(f"https://substack.com/api/v1/posts/by-id/{post_id}")
@@ -300,7 +316,7 @@ def backfill_post_urls(conn):
         except Exception as e:
             print(f"    Warning: couldn't fetch post {post_id}: {e}")
     conn.commit()
-    print("  Backfill complete.")
+    print(f"{ts()}  Backfill complete.")
 
 
 def fetch_all_posts(subdomain, limit=50):
@@ -504,14 +520,14 @@ def main():
                 days = int(sys.argv[i + 2])
 
         if "sync" in args:
-            print(f"Syncing (last {days} days)...")
+            print(f"{ts()} Syncing (last {days} days)...")
             sync_activity_feed(conn, days=days)
             sync_own_pubs(conn)
             backfill_post_urls(conn)
             conn.execute("INSERT INTO sync_log VALUES (?,?,?)",
                          (datetime.now(timezone.utc).isoformat(), "full", 0))
             conn.commit()
-            print("Sync complete.\n")
+            print(f"{ts()} Sync complete.\n")
 
         if "report" in args:
             report(conn)
