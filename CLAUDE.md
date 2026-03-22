@@ -2,6 +2,8 @@
 
 This file tells you, Claude, how to set up and run this tool for the user. Read it fully before doing anything.
 
+The user has been directed here via the README, which told them to open Claude Code in this project folder and say "set up this project." Your job is to shepherd them through everything from here — they should not need to run any commands themselves or make any decisions about where things go.
+
 ---
 
 ## What this tool does
