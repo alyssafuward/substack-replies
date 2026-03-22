@@ -6,44 +6,65 @@ This tool pulls all your replies and comments into a single local dashboard so y
 
 Built for Substack writers who publish across multiple publications and want a proper inbox, not a notification feed.
 
+This is your project to own. You can take updates from this repo, modify it yourself with Claude's help, or take it in a completely different direction. Think of it less like software you install and more like a side project you happen to be running.
+
 > **Note:** This tool uses Substack's internal API, which is unofficial and undocumented. It works as of the time of writing but could break if Substack changes their API. Everything runs locally — no data is sent anywhere, no accounts, no servers.
 
 ---
 
 ## Getting started
 
-See [SETUP.md](SETUP.md) for step-by-step instructions. The recommended way to set this up is using Claude Code — it will walk you through everything in plain language, no technical experience required.
+You'll need:
+- [Claude Code](https://claude.ai/code) installed
+- [Git](https://git-scm.com/downloads) installed — if you don't have it, Claude Code can help you get it set up
 
----
-
-## How it works
-
-1. Connects to Substack on your behalf using a session cookie — a temporary key your browser already uses to keep you logged in. Treat it like a password and don't share it with anyone.
-2. Fetches your recent replies, note responses, and comments on your own posts
-3. Saves everything locally on your computer
-4. Generates a dashboard you open in your browser to review and track what needs a response
-
----
-
-## Running the tool
-
-**If you're using Claude Code** (recommended), after you've completed setup: open Terminal, navigate to your Substack Replies folder, type `claude`, and say: *"sync my Substack replies and open the dashboard."* Claude handles the rest.
-
-**If you're running it manually** (for developers): open Terminal, navigate to the repo folder, and run:
+Clone the repo:
 
 ```bash
-# Fetch latest replies and comments
-python scraper.py sync
-
-# Generate the dashboard and open it in your browser
-python dashboard.py
+git clone https://github.com/alyssafuward/substack-replies.git
+cd substack-replies
 ```
 
-The dashboard shows:
-- Replies to your notes and comments that haven't been addressed yet
-- Comments on your own posts that are waiting for a reply
-- A "Show liked comments" toggle for items you've already engaged with
-- A "Done" section to track what you've handled
+Then open Claude Code in that folder and say: **"set up this project."** Claude will handle the rest — installing dependencies, configuring your account, and getting you to the dashboard.
+
+---
+
+## What's under the hood
+
+A few things worth knowing as the owner of this project:
+
+- **Python** — the tool runs on Python. Claude will help you install it if you don't have it.
+- **Local database** — your replies and comments are stored in a SQLite file (`replies.db`) on your machine. Nothing is sent to any server.
+- **Unofficial Substack API** — this tool reads from Substack's internal API, which is undocumented and could break if Substack changes something. It only reads — it never posts, likes, or modifies anything on your behalf.
+- **Session cookie** — to authenticate with Substack, the tool uses your browser session cookie, stored locally in `~/.zshrc`. Don't share it with anyone, and never paste it into chat — Claude knows not to ask for it that way.
+
+---
+
+## Ongoing use
+
+After setup, open Claude Code in the project folder and say: *"sync my Substack replies and open the dashboard."* Claude handles the rest.
+
+---
+
+## Getting updates
+
+When new versions of this project are available, Claude can pull them in for you:
+
+```
+git pull origin main
+```
+
+Or ask Claude: *"check for updates to substack-replies."*
+
+---
+
+## Security
+
+| What | Where | Notes |
+|------|-------|-------|
+| Session cookie (`SUBSTACK_SID`) | `~/.zshrc` | Live credential. Rotate by logging out of Substack if exposed. |
+| Your config | `config.py` (local, gitignored) | Your Substack user ID and publication IDs. Never committed. |
+| Your data | `replies.db` (local, gitignored) | Your readers' names and comment text. Never committed. |
 
 ---
 
@@ -51,27 +72,12 @@ The dashboard shows:
 
 ```
 substack-replies/
-├── scraper.py          # fetches data from Substack API, stores in replies.db
-├── dashboard.py        # generates the HTML dashboard from replies.db
-├── config.example.py   # template — copy to config.py and fill in your values
-├── config.py           # your personal config (gitignored, never committed)
-├── replies.db          # local SQLite database (gitignored, never committed)
-├── dashboard.html      # generated output (gitignored, regenerated each run)
-├── check.py            # sanity checks — run after code changes to verify nothing is broken
-├── SETUP.md            # step-by-step setup guide
-├── requirements.txt    # Python dependencies (just: requests)
-└── dev/
-    └── explore.py      # API exploration used during development, not needed for normal use
+├── app.py              # starts the local web server
+├── scraper.py          # fetches data from Substack, stores in replies.db
+├── dashboard.py        # builds the dashboard from replies.db
+├── config.example.py   # template for config.py
+├── config.py           # your personal config (gitignored)
+├── replies.db          # your local data (gitignored)
+├── check.py            # sanity checks after code changes
+└── requirements.txt    # Python dependencies
 ```
-
----
-
-## Security summary
-
-| What | Where | Risk |
-|------|-------|------|
-| Session cookie (`SUBSTACK_SID`) | `~/.zshrc` | Live credential. Rotate by logging out of Substack if exposed. |
-| User config (`config.py`) | Local only, gitignored | Contains public Substack IDs. Not sensitive, but kept off the repo. |
-| Reply data (`replies.db`) | Local only, gitignored | Contains your readers' names and comment text. Never committed. |
-| Generated dashboard (`dashboard.html`) | Local only, gitignored | Contains reply content. Never committed. |
-| Substack API | Unofficial, undocumented | Could break without notice. No write operations — read-only. |

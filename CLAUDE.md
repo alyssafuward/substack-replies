@@ -6,7 +6,31 @@ This file tells you, Claude, how to set up and run this tool for the user. Read 
 
 ## What this tool does
 
-Scrapes Substack replies and comments across the user's publications and activity feed, stores them locally, and generates an HTML dashboard so they can track which ones need a response.
+Scrapes Substack replies and comments across the user's publications and activity feed, stores them locally, and generates a local web dashboard so they can track which ones need a response.
+
+---
+
+## First time: cloning the repo
+
+If the project folder doesn't exist yet, help the user get it set up. Tell the user what you're doing and ask for approval at each step.
+
+**Check for git first:**
+```bash
+git --version
+```
+
+If git is not installed, help the user install it:
+- Mac: `xcode-select --install` will prompt an installer, or direct them to https://git-scm.com/downloads
+- Windows: direct them to https://git-scm.com/downloads
+
+Once git is available:
+```bash
+git clone https://github.com/alyssafuward/substack-replies.git
+cd substack-replies
+pip install -r requirements.txt
+```
+
+If Python is not installed, help the user install it from https://python.org before running pip.
 
 ---
 
@@ -103,7 +127,8 @@ source ~/.zshrc && python scraper.py sync
 
 **Open the dashboard:**
 ```bash
-python dashboard.py
+python app.py &
+open http://localhost:5001
 ```
 
 **Full resync (slower, use if data seems stale):**
