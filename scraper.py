@@ -168,10 +168,80 @@ def _has_descendant_by_user(comments, user_id):
     return False
 
 
+def recheck_note_replies(conn):
+    """
+    For each unresponded note_reply, fetch the thread via the reader API and check if:
+    - the user liked the reply (reaction on rootComment) → acknowledged
+    - the user replied back (commentBranch by USER_ID) → responded
+    Updates is_responded and refreshes stored raw_json with fresh reaction data.
+    Returns count still unresponded.
+    """
+    rows = conn.execute("""
+        SELECT a.id, a.comment_id
+        FROM activity_items a
+        LEFT JOIN comments c ON c.id = a.comment_id
+        WHERE a.is_responded = 0
+          AND a.type = 'note_reply'
+          AND a.comment_id IS NOT NULL
+          AND (c.raw_json IS NULL OR json_extract(c.raw_json, '$.reaction') IS NULL)
+        ORDER BY a.updated_at DESC
+        LIMIT ?
+    """, (UNRESPONDED_TARGET * 2,)).fetchall()
+
+    if not rows:
+        print(f"{ts()} Note recheck: nothing to check.")
+        return 0
+
+    print(f"{ts()} Rechecking {len(rows)} note replies...")
+    newly_responded = 0
+    still_unresponded = 0
+
+    for item_id, comment_id in rows:
+        try:
+            url = f"https://substack.com/api/v1/reader/comment/{comment_id}/replies?comment_id={comment_id}"
+            data = get(url)
+
+            responded = False
+
+            # Check if user liked the reply
+            root = data.get("rootComment", {})
+            if root.get("reaction"):
+                conn.execute("UPDATE comments SET raw_json=? WHERE id=?",
+                             (json.dumps(root), comment_id))
+                responded = True
+
+            # Check if user replied back
+            if not responded:
+                for branch in data.get("commentBranches", []):
+                    c = branch.get("comment", {})
+                    if c.get("user_id") == USER_ID:
+                        _store_comment(conn, c, pub_subdomain=None,
+                                       post_id=c.get("post_id"),
+                                       post_title=None, post_url=None)
+                        responded = True
+                        break
+
+            if responded:
+                conn.execute("UPDATE activity_items SET is_responded=1 WHERE id=?", (item_id,))
+                newly_responded += 1
+            else:
+                still_unresponded += 1
+
+            time.sleep(0.5)
+
+        except Exception as e:
+            print(f"{ts()}   warning: couldn't recheck note {comment_id}: {e}")
+            still_unresponded += 1
+
+    conn.commit()
+    print(f"{ts()} Note recheck done: {newly_responded} newly responded, {still_unresponded} still unresponded")
+    return still_unresponded
+
+
 def recheck_unresponded(conn):
     """
-    For each activity item currently marked unresponded, re-fetch its thread
-    and check if the user has since replied. Updates is_responded in the DB.
+    For each unresponded comment_reply, re-fetch its post thread and check if
+    the user has since replied. Updates is_responded in the DB.
     Returns count of items still unresponded after checking.
     """
     rows = conn.execute("""
@@ -179,7 +249,7 @@ def recheck_unresponded(conn):
         FROM activity_items a
         LEFT JOIN comments c ON c.id = a.comment_id
         WHERE a.is_responded = 0
-          AND a.type IN ('note_reply', 'comment_reply')
+          AND a.type = 'comment_reply'
           AND a.comment_id IS NOT NULL
           AND (c.raw_json IS NULL OR json_extract(c.raw_json, '$.reaction') IS NULL)  -- liked = acknowledged, skip recheck
         ORDER BY a.updated_at DESC
@@ -215,7 +285,7 @@ def recheck_unresponded(conn):
         key = (subdomain, post_id)
         groups.setdefault(key, []).append((item_id, comment_id))
 
-    print(f"{ts()} Rechecking {len(rows)} items...")
+    print(f"{ts()} Rechecking {len(rows)} comment replies...")
     still_unresponded = skip_count
     newly_responded = 0
 
@@ -718,6 +788,7 @@ def main():
 
             # Step 1: recheck items already in DB
             still_unresponded = recheck_unresponded(conn)
+            still_unresponded += recheck_note_replies(conn)
 
             # Step 2: always fetch a full target of new replies from new activity
             new_items, new_unresponded = 0, 0
