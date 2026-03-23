@@ -174,14 +174,14 @@ def load_stats(conn):
     activity_count = conn.execute("SELECT COUNT(*) FROM activity_items").fetchone()[0]
     comment_count = conn.execute("SELECT COUNT(*) FROM comments").fetchone()[0]
     post_count = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
-    last_sync = conn.execute(
-        "SELECT synced_at FROM sync_log ORDER BY synced_at DESC LIMIT 1"
+    synced_up_to = conn.execute(
+        "SELECT value FROM sync_state WHERE key='last_synced_at'"
     ).fetchone()
     return {
         "activity_items": activity_count,
         "comments": comment_count,
         "posts": post_count,
-        "last_sync": (last_sync[0] or "")[:16].replace("T", " ") if last_sync else "never",
+        "synced_up_to": (synced_up_to[0] or "")[:16].replace("T", " ") if synced_up_to else "never",
     }
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -417,7 +417,7 @@ def render_html(items, stats):
 <body>
   <div class="header">
     <h1>Substack Replies</h1>
-    <div class="subtitle">Generated {now} · last sync {stats['last_sync']}</div>
+    <div class="subtitle">Synced up to {stats['synced_up_to']}</div>
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>

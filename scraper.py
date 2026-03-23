@@ -18,7 +18,7 @@ import time
 import requests
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -31,8 +31,12 @@ except ImportError:
 DB_PATH = Path(__file__).parent / "replies.db"
 
 REPLY_TYPES = {"note_reply", "comment_reply", "new_comment"}
+UNRESPONDED_TARGET = 250
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
+
+def ts():
+    return datetime.now().strftime("[%H:%M:%S]")
 
 def get_headers():
     sid = os.environ.get("SUBSTACK_SID", "")
@@ -82,6 +86,7 @@ def init_db(conn):
             target_comment_id INTEGER, -- your comment that was replied to
             target_post_id INTEGER,
             is_new INTEGER,
+            is_responded INTEGER DEFAULT 0,
             raw_json TEXT
         );
 
@@ -116,20 +121,148 @@ def init_db(conn):
             type TEXT,
             items_fetched INTEGER
         );
+
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
     """)
+
+    # Migrate existing DB: add is_responded if it doesn't exist yet
+    try:
+        conn.execute("ALTER TABLE activity_items ADD COLUMN is_responded INTEGER DEFAULT 0")
+    except Exception:
+        pass  # column already exists
+
     conn.commit()
 
-# ── Activity Feed Sync ────────────────────────────────────────────────────────
+def get_state(conn, key):
+    row = conn.execute("SELECT value FROM sync_state WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
 
-def sync_activity_feed(conn, days=60):
-    """Paginate through activity-feed-web and store all items up to `days` old."""
+def set_state(conn, key, value):
+    conn.execute("INSERT OR REPLACE INTO sync_state (key, value) VALUES (?,?)", (key, value))
+
+# ── Sync: Recheck Unresponded ─────────────────────────────────────────────────
+
+def _user_replied_in_thread(comments, target_comment_id, user_id):
+    """
+    Search the nested comment tree for target_comment_id, then check if
+    any of its descendants were written by user_id.
+    Returns True if the user has replied to that comment.
+    """
+    for c in comments:
+        if str(c.get("id")) == str(target_comment_id):
+            return _has_descendant_by_user(c.get("children", []), user_id)
+        if _user_replied_in_thread(c.get("children", []), target_comment_id, user_id):
+            return True
+    return False
+
+
+def _has_descendant_by_user(comments, user_id):
+    for c in comments:
+        if c.get("user_id") == user_id:
+            return True
+        if _has_descendant_by_user(c.get("children", []), user_id):
+            return True
+    return False
+
+
+def recheck_unresponded(conn):
+    """
+    For each activity item currently marked unresponded, re-fetch its thread
+    and check if the user has since replied. Updates is_responded in the DB.
+    Returns count of items still unresponded after checking.
+    """
+    rows = conn.execute("""
+        SELECT a.id, a.comment_id, a.target_post_id
+        FROM activity_items a
+        WHERE a.is_responded = 0
+          AND a.type IN ('note_reply', 'comment_reply')
+          AND a.comment_id IS NOT NULL
+        ORDER BY a.updated_at DESC
+        LIMIT ?
+    """, (UNRESPONDED_TARGET * 2,)).fetchall()
+
+    if not rows:
+        print(f"{ts()} Recheck: nothing to check.")
+        return 0
+
+    print(f"{ts()} Rechecking {len(rows)} unresponded items...")
+    still_unresponded = 0
+    newly_responded = 0
+
+    for item_id, comment_id, post_id in rows:
+        # Look up post_url from stored comment data
+        row = conn.execute(
+            "SELECT post_url FROM comments WHERE id=?", (comment_id,)
+        ).fetchone()
+
+        if not row or not row[0] or not post_id:
+            still_unresponded += 1
+            continue
+
+        post_url = row[0]
+        parsed = urlparse(post_url)
+        host = parsed.netloc
+
+        if not host.endswith(".substack.com"):
+            # Custom domain — can't determine subdomain, skip
+            still_unresponded += 1
+            continue
+
+        subdomain = host.replace(".substack.com", "")
+
+        try:
+            comments = fetch_post_comments(subdomain, post_id)
+
+            if _user_replied_in_thread(comments, comment_id, USER_ID):
+                conn.execute(
+                    "UPDATE activity_items SET is_responded=1 WHERE id=?", (item_id,)
+                )
+                newly_responded += 1
+                print(f"{ts()}   responded: {item_id}")
+            else:
+                still_unresponded += 1
+
+        except Exception as e:
+            print(f"{ts()}   warning: couldn't recheck {item_id}: {e}")
+            still_unresponded += 1
+
+        time.sleep(0.5)
+
+    conn.commit()
+    print(f"{ts()} Recheck done: {newly_responded} newly responded, {still_unresponded} still unresponded")
+    return still_unresponded
+
+# ── Sync: Activity Feed ───────────────────────────────────────────────────────
+
+def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_last_synced=None):
+    """
+    Fetch activity feed newest-first, storing items until `target` new
+    unresponded items are found or the feed is exhausted / last sync point reached.
+
+    target:          how many new unresponded items to collect before stopping
+    after_cursor:    pagination cursor — set to oldest_fetched_at for backfill/load-more;
+                     also used with --as-of to jump to a specific date
+    set_last_synced: override whether last_synced_at is updated (default: True when after_cursor is None)
+
+    Returns (new_items, new_unresponded, oldest_ts_seen).
+    """
     url = "https://substack.com/api/v1/activity-feed-web"
-    after = None
-    total = 0
-    pages = 0
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    last_synced_at = get_state(conn, "last_synced_at")
 
-    while True:
+    after = after_cursor
+    new_items = 0
+    new_unresponded = 0
+    pages = 0
+    newest_ts = None
+    oldest_ts = None
+    done = False
+
+    print(f"{ts()} Fetching activity feed (need {target} more replies)...")
+
+    while not done:
         params = {"limit": 10}
         if after:
             params["after"] = after
@@ -138,75 +271,123 @@ def sync_activity_feed(conn, days=60):
         items = data.get("activityItems", [])
 
         if not items:
+            print(f"{ts()}   Feed exhausted.")
             break
 
+        pages += 1
         new_this_page = 0
-        for item in items:
-            # Stop if older than cutoff
-            item_ts = item.get("updated_at") or item.get("created_at") or ""
-            if item_ts and item_ts < cutoff:
-                conn.commit()
-                print(f"  Activity feed: {total} new items ({pages+1} pages, reached {days}-day cutoff)")
-                return total
 
-            existing = conn.execute(
-                "SELECT id FROM activity_items WHERE id=?", (item["id"],)
-            ).fetchone()
-            if existing:
+        # Store thread context for this page first
+        for fic in data.get("feedItemComments", []):
+            post = fic.get("post") or {}
+            post_url = post.get("canonical_url")
+            post_title = post.get("title")
+            post_id_fic = post.get("id")
+            c = fic.get("comment")
+            if c:
+                _store_comment(conn, c, pub_subdomain=None,
+                               post_id=post_id_fic or c.get("post_id"),
+                               post_title=post_title, post_url=post_url)
+            for pc in fic.get("parentComments", []):
+                _store_comment(conn, pc, pub_subdomain=None,
+                               post_id=post_id_fic or pc.get("post_id"),
+                               post_title=post_title, post_url=post_url)
+
+        for item in items:
+            item_ts = item.get("updated_at") or item.get("created_at") or ""
+
+            # Track timestamp range seen this run
+            if item_ts:
+                if newest_ts is None or item_ts > newest_ts:
+                    newest_ts = item_ts
+                if oldest_ts is None or item_ts < oldest_ts:
+                    oldest_ts = item_ts
+
+            # Stop when we reach already-synced territory (forward fetches only, not backfill)
+            if after_cursor is None and last_synced_at and item_ts and item_ts <= last_synced_at:
+                print(f"{ts()}   Reached last sync point.")
+                done = True
+                break
+
+            # Skip duplicates
+            if conn.execute("SELECT 1 FROM activity_items WHERE id=?", (item["id"],)).fetchone():
                 continue
+
+            item_type = item.get("type")
+            comment_id = item.get("comment_id")
 
             conn.execute("""
                 INSERT OR IGNORE INTO activity_items
                 (id, type, created_at, updated_at, comment_id, target_comment_id,
-                 target_post_id, is_new, raw_json)
-                VALUES (?,?,?,?,?,?,?,?,?)
+                 target_post_id, is_new, is_responded, raw_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
             """, (
                 item["id"],
-                item.get("type"),
+                item_type,
                 item.get("created_at"),
                 item.get("updated_at"),
-                item.get("comment_id"),
+                comment_id,
                 item.get("target_comment_id"),
                 item.get("target_post_id"),
                 1 if item.get("isNew") else 0,
+                0,
                 json.dumps(item),
             ))
-
-            # Store feed item comments (the full thread context)
-            for fic in data.get("feedItemComments", []):
-                post = fic.get("post") or {}
-                post_url = post.get("canonical_url")
-                post_title = post.get("title")
-                post_id_fic = post.get("id")
-                c = fic.get("comment")
-                if c:
-                    _store_comment(conn, c, pub_subdomain=None, post_id=post_id_fic or c.get("post_id"), post_title=post_title, post_url=post_url)
-                for pc in fic.get("parentComments", []):
-                    _store_comment(conn, pc, pub_subdomain=None, post_id=post_id_fic or pc.get("post_id"), post_title=post_title, post_url=post_url)
-
             new_this_page += 1
 
-        total += new_this_page
-        pages += 1
+            # Count toward target if it's a reply type and not already responded
+            if item_type in REPLY_TYPES and comment_id:
+                your_reply = conn.execute("""
+                    SELECT id FROM comments
+                    WHERE user_id=? AND ancestor_path LIKE ? AND id > ?
+                """, (USER_ID, f"%{comment_id}%", comment_id)).fetchone()
 
-        if not data.get("more"):
+                if your_reply:
+                    conn.execute(
+                        "UPDATE activity_items SET is_responded=1 WHERE id=?", (item["id"],)
+                    )
+                elif new_unresponded < target:
+                    new_unresponded += 1
+                    if new_unresponded >= target:
+                        print(f"{ts()}   Hit target of {target} replies.")
+                        done = True
+                        break
+
+        new_items += new_this_page
+        conn.commit()
+
+        print(f"{ts()}   Page {pages} — {new_this_page} stored | {new_unresponded}/{target} replies")
+
+        if not done and not data.get("more"):
+            print(f"{ts()}   No more pages.")
+            done = True
             break
 
-        conn.commit()  # save progress after each page
-        time.sleep(2)  # be polite
+        if not done:
+            time.sleep(1)
+            updated_ats = [
+                item.get("updated_at") or item.get("created_at")
+                for item in items
+                if item.get("updated_at") or item.get("created_at")
+            ]
+            if not updated_ats:
+                break
+            min_ts = min(updated_ats)
+            dt = datetime.fromisoformat(min_ts.replace("Z", "+00:00"))
+            after = (dt - timedelta(milliseconds=1)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
-        # Pagination: use min(updated_at) - 1ms
-        updated_ats = [item.get("updated_at") or item.get("created_at") for item in items if item.get("updated_at") or item.get("created_at")]
-        if not updated_ats:
-            break
-        min_ts = min(updated_ats)
-        # Subtract 1ms
-        dt = datetime.fromisoformat(min_ts.replace("Z", "+00:00"))
-        after = (dt - timedelta(milliseconds=1)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
+    # Update watermarks
+    should_update_last_synced = set_last_synced if set_last_synced is not None else (after_cursor is None)
+    if newest_ts and should_update_last_synced:
+        set_state(conn, "last_synced_at", newest_ts)
+    if oldest_ts:
+        current_oldest = get_state(conn, "oldest_fetched_at")
+        if not current_oldest or oldest_ts < current_oldest:
+            set_state(conn, "oldest_fetched_at", oldest_ts)
     conn.commit()
-    print(f"  Activity feed: {total} new items ({pages} pages)")
-    return total
+
+    print(f"{ts()} Activity feed done: {new_items} new items, {new_unresponded} replies counted ({pages} pages)")
+    return new_items, new_unresponded, oldest_ts
 
 
 def _store_comment(conn, c, pub_subdomain, post_id, post_title, post_url):
@@ -246,7 +427,7 @@ def sync_own_pubs(conn):
     total_comments = 0
 
     for subdomain in OWN_PUBS:
-        print(f"  Syncing {subdomain}...")
+        print(f"{ts()}  Syncing {subdomain}...")
         posts = fetch_all_posts(subdomain)
 
         for post in posts:
@@ -268,7 +449,7 @@ def sync_own_pubs(conn):
                 total_comments += 1
 
         conn.commit()
-        print(f"    {subdomain}: {len(posts)} posts, {total_comments} total comments")
+        print(f"{ts()}    {subdomain}: {len(posts)} posts, {total_comments} total comments")
 
     return total_comments
 
@@ -281,10 +462,10 @@ def backfill_post_urls(conn):
     """).fetchall()
 
     if not rows:
-        print("  No missing post URLs to backfill.")
+        print(f"{ts()}  No missing post URLs to backfill.")
         return
 
-    print(f"  Backfilling URLs for {len(rows)} posts...")
+    print(f"{ts()}  Backfilling URLs for {len(rows)} posts...")
     for (post_id,) in rows:
         try:
             data = get(f"https://substack.com/api/v1/posts/by-id/{post_id}")
@@ -300,7 +481,7 @@ def backfill_post_urls(conn):
         except Exception as e:
             print(f"    Warning: couldn't fetch post {post_id}: {e}")
     conn.commit()
-    print("  Backfill complete.")
+    print(f"{ts()}  Backfill complete.")
 
 
 def fetch_all_posts(subdomain, limit=50):
@@ -489,29 +670,60 @@ def report_own_pub_comments(conn):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    args = set(sys.argv[1:])
+    argv = sys.argv[1:]
+    args = set(argv)
+
+    # Parse --as-of YYYY-MM-DD (simulate syncing as of a past date)
+    as_of_date = None
+    as_of_cursor = None
+    if "--as-of" in argv:
+        idx = argv.index("--as-of")
+        if idx + 1 < len(argv):
+            as_of_date = argv[idx + 1]
+            # Jump to end of that day: fetch items older than midnight of the next day
+            as_of_dt = datetime.strptime(as_of_date, "%Y-%m-%d") + timedelta(days=1)
+            as_of_cursor = as_of_dt.strftime("%Y-%m-%dT00:00:00.000Z")
+            args.discard("--as-of")
+            args.discard(as_of_date)
+
     if not args:
-        print("Usage: python scraper.py [sync] [report]")
+        print("Usage: python scraper.py [sync] [report] [--as-of YYYY-MM-DD]")
         sys.exit(0)
 
     with sqlite3.connect(DB_PATH) as conn:
         init_db(conn)
 
-        # Parse --days N (default 60)
-        days = 60
-        for i, arg in enumerate(sys.argv[1:]):
-            if arg == "--days" and i + 2 < len(sys.argv):
-                days = int(sys.argv[i + 2])
-
         if "sync" in args:
-            print(f"Syncing (last {days} days)...")
-            sync_activity_feed(conn, days=days)
-            sync_own_pubs(conn)
-            backfill_post_urls(conn)
+            if as_of_date:
+                print(f"{ts()} Starting sync (--as-of {as_of_date})...")
+            else:
+                print(f"{ts()} Starting sync...")
+
+            # Step 1: recheck items already in DB
+            still_unresponded = recheck_unresponded(conn)
+
+            # Step 2: always fetch a full target of new replies from new activity
+            new_items, new_unresponded = 0, 0
+            oldest_ts = None
+            new_items, new_unresponded, oldest_ts = sync_activity_feed(
+                conn, target=UNRESPONDED_TARGET,
+                after_cursor=as_of_cursor,   # None for normal sync; date cursor for --as-of
+                set_last_synced=True,
+            )
+
+            # Step 3: backfill if new period ran out before hitting target
+            if new_unresponded < UNRESPONDED_TARGET:
+                remaining = UNRESPONDED_TARGET - new_unresponded
+                oldest_cursor = get_state(conn, "oldest_fetched_at")
+                if oldest_cursor:
+                    print(f"{ts()} Backfilling — need {remaining} more replies...")
+                    sync_activity_feed(conn, target=remaining, after_cursor=oldest_cursor,
+                                       set_last_synced=False)
+
             conn.execute("INSERT INTO sync_log VALUES (?,?,?)",
-                         (datetime.now(timezone.utc).isoformat(), "full", 0))
+                         (datetime.now(timezone.utc).isoformat(), "activity_feed", new_items))
             conn.commit()
-            print("Sync complete.\n")
+            print(f"{ts()} Sync complete.\n")
 
         if "report" in args:
             report(conn)
