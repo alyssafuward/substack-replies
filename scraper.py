@@ -181,7 +181,7 @@ def recheck_unresponded(conn):
         WHERE a.is_responded = 0
           AND a.type IN ('note_reply', 'comment_reply')
           AND a.comment_id IS NOT NULL
-          AND (c.raw_json IS NULL OR json_extract(c.raw_json, '$.reaction') IS NULL)
+          AND (c.raw_json IS NULL OR json_extract(c.raw_json, '$.reaction') IS NULL)  -- liked = acknowledged, skip recheck
         ORDER BY a.updated_at DESC
         LIMIT ?
     """, (UNRESPONDED_TARGET * 2,)).fetchall()

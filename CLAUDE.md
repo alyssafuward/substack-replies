@@ -84,3 +84,7 @@ python check.py               # run sanity checks after any code changes
 2. Fetches activity feed (note replies, comment replies) + comments on your own posts
 3. Stores everything in a local SQLite database
 4. `app.py` serves a Flask web app at localhost:5001
+
+## Likes = acknowledged
+
+**Liking a reply is intentional user behavior meaning "seen and acknowledged."** It is not a bug or a gap in detection. Items where the user has liked the reply are separated into a collapsed "liked comments" section and excluded from the main unanswered queue. The recheck logic in `scraper.py` intentionally skips liked items for the same reason — they don't need to be rechecked for a response. Do not flag this as missing functionality.
