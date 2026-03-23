@@ -168,6 +168,17 @@ def _has_descendant_by_user(comments, user_id):
     return False
 
 
+def _find_comment(comments, comment_id):
+    """Find and return a comment dict by ID in a nested thread tree."""
+    for c in comments:
+        if str(c.get("id")) == str(comment_id):
+            return c
+        found = _find_comment(c.get("children", []), comment_id)
+        if found:
+            return found
+    return None
+
+
 def recheck_note_replies(conn):
     """
     For each unresponded note_reply, fetch the thread via the reader API and check if:
@@ -198,21 +209,22 @@ def recheck_note_replies(conn):
 
     for item_id, comment_id in rows:
         try:
-            url = f"https://substack.com/api/v1/reader/comment/{comment_id}/replies?comment_id={comment_id}"
-            data = get(url)
-
             responded = False
 
-            # Check if user liked the reply
-            root = data.get("rootComment", {})
-            if root.get("reaction"):
+            # Check if user liked the reply via single-comment endpoint (includes reaction)
+            item_data = get(f"https://substack.com/api/v1/reader/comment/{comment_id}")
+            comment = item_data.get("item", {}).get("comment", {})
+            if comment.get("reaction"):
                 conn.execute("UPDATE comments SET raw_json=? WHERE id=?",
-                             (json.dumps(root), comment_id))
+                             (json.dumps(comment), comment_id))
                 responded = True
 
             # Check if user replied back
             if not responded:
-                for branch in data.get("commentBranches", []):
+                replies_data = get(
+                    f"https://substack.com/api/v1/reader/comment/{comment_id}/replies?comment_id={comment_id}"
+                )
+                for branch in replies_data.get("commentBranches", []):
                     c = branch.get("comment", {})
                     if c.get("user_id") == USER_ID:
                         _store_comment(conn, c, pub_subdomain=None,
@@ -294,7 +306,16 @@ def recheck_unresponded(conn):
             comments = fetch_post_comments(subdomain, post_id)
 
             for item_id, comment_id in items:
-                if _user_replied_in_thread(comments, comment_id, USER_ID):
+                # Refresh stored comment with fresh data (includes current reaction)
+                fresh = _find_comment(comments, comment_id)
+                if fresh:
+                    conn.execute("UPDATE comments SET raw_json=? WHERE id=?",
+                                 (json.dumps(fresh), comment_id))
+
+                liked = fresh and bool(fresh.get("reaction"))
+                replied = _user_replied_in_thread(comments, comment_id, USER_ID)
+
+                if liked or replied:
                     conn.execute(
                         "UPDATE activity_items SET is_responded=1 WHERE id=?", (item_id,)
                     )
