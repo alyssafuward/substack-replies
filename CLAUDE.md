@@ -1,6 +1,6 @@
 # Substack Replies
 
-A personal tool that scrapes Substack replies and displays them in a local HTML dashboard, so you can track which ones need a response.
+A personal tool that scrapes Substack replies and displays them in a local Flask web app, so you can track which ones need a response.
 
 ## When starting a new session
 
@@ -69,7 +69,7 @@ Then run `python check.py` to verify everything is working.
 
 ```bash
 python scraper.py sync        # fetch latest activity + comments
-python dashboard.py           # generate dashboard.html and open it
+python app.py                 # start Flask app at http://localhost:5001
 python check.py               # run sanity checks after any code changes
 ```
 
@@ -83,4 +83,4 @@ python check.py               # run sanity checks after any code changes
 1. Hits Substack's internal API (unofficial, no public docs) authenticated via session cookie
 2. Fetches activity feed (note replies, comment replies) + comments on your own posts
 3. Stores everything in a local SQLite database
-4. `dashboard.py` generates a self-contained HTML file you open in your browser
+4. `app.py` serves a Flask web app at localhost:5001

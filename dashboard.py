@@ -1,16 +1,10 @@
-#!/usr/bin/env python3
 """
-Generate a self-contained HTML dashboard of Substack replies needing response.
-
-Usage:
-  python dashboard.py            # generates dashboard.html and opens it
-  python dashboard.py --no-open  # generates dashboard.html without opening
+Data loading and HTML rendering for the Substack Replies Flask app.
 """
 
 import sys
 import json
 import sqlite3
-import webbrowser
 from pathlib import Path
 from datetime import datetime
 
@@ -21,7 +15,6 @@ except ImportError:
     sys.exit(1)
 
 DB_PATH = Path(__file__).parent / "replies.db"
-OUT_PATH = Path(__file__).parent / "dashboard.html"
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -592,24 +585,3 @@ def render_html(items, stats):
 </body>
 </html>"""
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
-def main():
-    if not DB_PATH.exists():
-        print("No data found. Run: python scraper.py sync")
-        sys.exit(1)
-
-    with sqlite3.connect(DB_PATH) as conn:
-        items = load_data(conn)
-        stats = load_stats(conn)
-
-    html = render_html(items, stats)
-    OUT_PATH.write_text(html, encoding="utf-8")
-    print(f"Report generated: {OUT_PATH}")
-    print(f"Found {len(items)} replies needing response.")
-
-    if "--no-open" not in sys.argv:
-        webbrowser.open(f"file://{OUT_PATH.resolve()}")
-
-if __name__ == "__main__":
-    main()
