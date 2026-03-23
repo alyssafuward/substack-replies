@@ -8,13 +8,34 @@ Usage:
 """
 
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
-from flask import Flask, Response
+from flask import Flask, Response, request
 
 from dashboard import load_data, load_stats, render_html
 
 app = Flask(__name__)
 DB_PATH = Path(__file__).parent / "replies.db"
+
+
+@app.route("/sync")
+def sync():
+    count = request.args.get("count", 250, type=int)
+    def generate():
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "scraper.py", "sync", "--count", str(count)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=Path(__file__).parent,
+            text=True,
+        )
+        for line in proc.stdout:
+            yield f"data: {line.rstrip()}\n\n"
+        proc.wait()
+        yield "data: __done__\n\n"
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
 @app.route("/")

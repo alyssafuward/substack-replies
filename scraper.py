@@ -177,9 +177,11 @@ def recheck_unresponded(conn):
     rows = conn.execute("""
         SELECT a.id, a.comment_id, a.target_post_id
         FROM activity_items a
+        LEFT JOIN comments c ON c.id = a.comment_id
         WHERE a.is_responded = 0
           AND a.type IN ('note_reply', 'comment_reply')
           AND a.comment_id IS NOT NULL
+          AND (c.raw_json IS NULL OR json_extract(c.raw_json, '$.reaction') IS NULL)
         ORDER BY a.updated_at DESC
         LIMIT ?
     """, (UNRESPONDED_TARGET * 2,)).fetchall()
@@ -188,18 +190,17 @@ def recheck_unresponded(conn):
         print(f"{ts()} Recheck: nothing to check.")
         return 0
 
-    print(f"{ts()} Rechecking {len(rows)} unresponded items...")
-    still_unresponded = 0
-    newly_responded = 0
+    # Group items by (subdomain, post_id) to fetch each post's comments only once
+    groups = {}  # (subdomain, post_id) -> [(item_id, comment_id), ...]
+    skip_count = 0
 
     for item_id, comment_id, post_id in rows:
-        # Look up post_url from stored comment data
         row = conn.execute(
             "SELECT post_url FROM comments WHERE id=?", (comment_id,)
         ).fetchone()
 
         if not row or not row[0] or not post_id:
-            still_unresponded += 1
+            skip_count += 1
             continue
 
         post_url = row[0]
@@ -207,29 +208,36 @@ def recheck_unresponded(conn):
         host = parsed.netloc
 
         if not host.endswith(".substack.com"):
-            # Custom domain — can't determine subdomain, skip
-            still_unresponded += 1
+            skip_count += 1
             continue
 
         subdomain = host.replace(".substack.com", "")
+        key = (subdomain, post_id)
+        groups.setdefault(key, []).append((item_id, comment_id))
 
+    print(f"{ts()} Rechecking {len(rows)} items across {len(groups)} posts...")
+    still_unresponded = 0
+    newly_responded = 0
+
+    for (subdomain, post_id), items in groups.items():
         try:
             comments = fetch_post_comments(subdomain, post_id)
 
-            if _user_replied_in_thread(comments, comment_id, USER_ID):
-                conn.execute(
-                    "UPDATE activity_items SET is_responded=1 WHERE id=?", (item_id,)
-                )
-                newly_responded += 1
-                print(f"{ts()}   responded: {item_id}")
-            else:
-                still_unresponded += 1
+            for item_id, comment_id in items:
+                if _user_replied_in_thread(comments, comment_id, USER_ID):
+                    conn.execute(
+                        "UPDATE activity_items SET is_responded=1 WHERE id=?", (item_id,)
+                    )
+                    newly_responded += 1
+                    print(f"{ts()}   responded: {item_id}")
+                else:
+                    still_unresponded += 1
 
         except Exception as e:
-            print(f"{ts()}   warning: couldn't recheck {item_id}: {e}")
-            still_unresponded += 1
+            print(f"{ts()}   warning: couldn't recheck post {post_id}: {e}")
+            still_unresponded += len(items)
 
-        time.sleep(0.5)
+        time.sleep(1)
 
     conn.commit()
     print(f"{ts()} Recheck done: {newly_responded} newly responded, {still_unresponded} still unresponded")
@@ -673,6 +681,15 @@ def main():
     argv = sys.argv[1:]
     args = set(argv)
 
+    # Parse --count N (how many replies to fetch, overrides UNRESPONDED_TARGET)
+    count = UNRESPONDED_TARGET
+    if "--count" in argv:
+        idx = argv.index("--count")
+        if idx + 1 < len(argv):
+            count = int(argv[idx + 1])
+            args.discard("--count")
+            args.discard(argv[idx + 1])
+
     # Parse --as-of YYYY-MM-DD (simulate syncing as of a past date)
     as_of_date = None
     as_of_cursor = None
@@ -706,14 +723,14 @@ def main():
             new_items, new_unresponded = 0, 0
             oldest_ts = None
             new_items, new_unresponded, oldest_ts = sync_activity_feed(
-                conn, target=UNRESPONDED_TARGET,
+                conn, target=count,
                 after_cursor=as_of_cursor,   # None for normal sync; date cursor for --as-of
                 set_last_synced=True,
             )
 
             # Step 3: backfill if new period ran out before hitting target
-            if new_unresponded < UNRESPONDED_TARGET:
-                remaining = UNRESPONDED_TARGET - new_unresponded
+            if new_unresponded < count:
+                remaining = count - new_unresponded
                 oldest_cursor = get_state(conn, "oldest_fetched_at")
                 if oldest_cursor:
                     print(f"{ts()} Backfilling — need {remaining} more replies...")

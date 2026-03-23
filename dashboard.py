@@ -163,6 +163,18 @@ def load_data(conn):
     return results
 
 
+def _format_sync_time(iso_str):
+    if not iso_str:
+        return "never"
+    try:
+        from datetime import timezone
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        local = dt.astimezone()
+        return local.strftime("%-m/%-d at %-I:%M %p")
+    except Exception:
+        return iso_str[:16].replace("T", " ")
+
+
 def load_stats(conn):
     activity_count = conn.execute("SELECT COUNT(*) FROM activity_items").fetchone()[0]
     comment_count = conn.execute("SELECT COUNT(*) FROM comments").fetchone()[0]
@@ -174,7 +186,7 @@ def load_stats(conn):
         "activity_items": activity_count,
         "comments": comment_count,
         "posts": post_count,
-        "synced_up_to": (synced_up_to[0] or "")[:16].replace("T", " ") if synced_up_to else "never",
+        "synced_up_to": _format_sync_time(synced_up_to[0]) if synced_up_to else "never",
     }
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -307,6 +319,19 @@ def render_html(items, stats):
       font-size: 0.8rem; color: #555; border: 1px solid #e5e5e5;
     }}
     .stat strong {{ color: #1a1a1a; font-size: 1rem; display: block; }}
+    .sync-row {{ display: flex; align-items: center; gap: 10px; margin-top: 14px; }}
+    .sync-btn {{
+      background: #ff3300; color: white; border: none; border-radius: 6px;
+      padding: 6px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+    }}
+    .sync-btn:disabled {{ background: #ccc; cursor: default; }}
+    .sync-btn:hover:not(:disabled) {{ background: #cc2900; }}
+    .sync-status {{ font-size: 0.82rem; color: #888; }}
+    .sync-log {{
+      margin-top: 10px; padding: 10px; background: #1a1a1a; color: #ccc;
+      font-size: 0.75rem; border-radius: 6px; max-height: 200px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-all;
+    }}
     .count-banner {{
       max-width: 720px; margin: 0 auto 20px;
       background: #ff3300; color: white;
@@ -415,6 +440,19 @@ def render_html(items, stats):
       <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
     </div>
+    <div class="sync-row">
+      <label style="font-size:0.82rem; color:#666;">New replies to sync:</label>
+      <select id="sync-count" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+        <option value="250" selected>250</option>
+      </select>
+      <button class="sync-btn" id="sync-btn" onclick="startSync()">Sync</button>
+      <span class="sync-status" id="sync-status"></span>
+    </div>
+    <pre class="sync-log" id="sync-log" style="display:none"></pre>
   </div>
 
   <div class="intro">
@@ -581,6 +619,38 @@ def render_html(items, stats):
     }});
     updateCount();
     updateDoneCount();
+
+    function startSync() {{
+      const btn = document.getElementById('sync-btn');
+      const count = document.getElementById('sync-count').value;
+      const status = document.getElementById('sync-status');
+      const log = document.getElementById('sync-log');
+      btn.disabled = true;
+      btn.textContent = 'Syncing…';
+      status.textContent = 'Starting…';
+      log.textContent = '';
+      log.style.display = 'block';
+
+      const es = new EventSource('/sync?count=' + count);
+      es.onmessage = function(e) {{
+        if (e.data === '__done__') {{
+          es.close();
+          btn.disabled = false;
+          btn.textContent = 'Sync';
+          status.textContent = 'Done — reload to see new replies';
+          return;
+        }}
+        log.textContent += e.data + '\\n';
+        log.scrollTop = log.scrollHeight;
+        status.textContent = e.data;
+      }};
+      es.onerror = function() {{
+        es.close();
+        btn.disabled = false;
+        btn.textContent = 'Sync';
+        status.textContent = 'Error — check terminal';
+      }};
+    }}
   </script>
 </body>
 </html>"""
