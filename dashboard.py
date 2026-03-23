@@ -275,7 +275,6 @@ def render_card(item, section="action"):
         </div>
         <div class="card-actions">
           {link_html}
-          <button class="done-btn" onclick="markDone({cid})" title="Mark as done">✓ Done</button>
         </div>
       </div>
       <div class="who">{who} <span class="label">{label}</span></div>
@@ -345,7 +344,7 @@ def render_html(items, stats):
       border: 1px solid #e5e5e5; transition: box-shadow 0.15s;
     }}
     .card:hover {{ box-shadow: 0 2px 12px rgba(0,0,0,0.07); }}
-    .card.done {{ display: none; }}
+
     .card-header {{
       display: flex; justify-content: space-between; align-items: center;
       margin-bottom: 10px; gap: 8px;
@@ -366,12 +365,7 @@ def render_html(items, stats):
       font-size: 0.82rem; color: #cc3300; text-decoration: none; font-weight: 500; white-space: nowrap;
     }}
     .reply-link:hover {{ text-decoration: underline; }}
-    .done-btn {{
-      font-size: 0.8rem; background: #f0f0f0; border: 1px solid #ddd;
-      border-radius: 6px; padding: 3px 10px; cursor: pointer; color: #555;
-      white-space: nowrap; font-weight: 500;
-    }}
-    .done-btn:hover {{ background: #22c55e; color: white; border-color: #22c55e; }}
+
     .who {{ font-weight: 600; font-size: 0.97rem; margin-bottom: 8px; }}
     .label {{ font-weight: 400; color: #666; }}
     .field-label {{ font-size: 0.72rem; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 4px; }}
@@ -427,8 +421,7 @@ def render_html(items, stats):
     .liked-section {{ display: none; margin-top: 10px; }}
     .liked-section .card {{ opacity: 0.55; background: #fafafa; }}
     .liked-section .card:hover {{ opacity: 0.8; }}
-    .done-section {{ display: none; margin-top: 10px; }}
-    .done-section .card {{ opacity: 0.5; background: #fafafa; }}
+
     a {{ color: #bbb; }}
   </style>
 </head>
@@ -466,13 +459,10 @@ def render_html(items, stats):
     <div class="how-it-works" id="how-it-works">
       <h3>What you're seeing</h3>
       This list shows comments and replies across your publications that haven't been addressed yet. Click <strong>Open on Substack →</strong> to jump directly to a comment and respond.
-      <h3>Marking items done</h3>
-      Once you've responded to a comment, click <strong>✓ Done</strong> to remove it from your list.<br>
-      <em>Note: Done status is only saved in this browser session. If you refresh or close the browser, items you marked as Done may reappear. To resync the status of your replies, update them through Claude Code.</em>
       <h3>Liked comments</h3>
       By default, if you've liked a comment on Substack, Substack Replies takes that as a signal the comment has been acknowledged and hides it from your list. To show all unanswered replies regardless of likes, toggle <strong>Show liked comments</strong> below.
       <h3>Keeping your data fresh</h3>
-      This view is a snapshot — it won't update on its own. To pull in the latest replies, ask Claude: <em>"sync my Substack replies."</em>
+      Use the <strong>Sync</strong> button above to pull in the latest replies and recheck which ones you've responded to or liked.
     </div>
   </div>
 
@@ -487,86 +477,8 @@ def render_html(items, stats):
 
   {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Show liked comments (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
 
-  <div class="toggle-section">
-    <button class="toggle-btn" onclick="toggleDone(this)">▶ Done (<span id="done-count">0</span>)</button>
-    <div class="done-section" id="done-section">
-      <div class="cards" id="done-cards"></div>
-      <div style="max-width:720px;margin:8px auto 0;text-align:right">
-        <a href="javascript:clearDone()" style="font-size:0.78rem;color:#bbb;">Clear all done</a>
-      </div>
-    </div>
-  </div>
 
   <script>
-    const DONE_KEY = 'substack_done';
-
-    function getDone() {{
-      try {{ return new Set(JSON.parse(localStorage.getItem(DONE_KEY) || '[]')); }}
-      catch {{ return new Set(); }}
-    }}
-    function saveDone(set) {{
-      localStorage.setItem(DONE_KEY, JSON.stringify([...set]));
-    }}
-
-    function markDone(id) {{
-      const card = document.querySelector(`#action-cards [data-id="${{id}}"]`);
-      if (!card) return;
-      const done = getDone();
-      done.add(String(id));
-      saveDone(done);
-      moveToDone(card, id);
-      updateCount();
-      updateDoneCount();
-    }}
-
-    function undoItem(id) {{
-      const card = document.querySelector(`#done-cards [data-id="${{id}}"]`);
-      if (!card) return;
-      // Remove undo button, restore done button
-      const undoBtn = card.querySelector('.undo-btn-inline');
-      if (undoBtn) undoBtn.remove();
-      const doneBtn = card.querySelector('.done-btn');
-      if (doneBtn) {{ doneBtn.style.display = ''; }}
-      // Move back to action cards
-      document.getElementById('action-cards').prepend(card);
-      const done = getDone();
-      done.delete(String(id));
-      saveDone(done);
-      updateCount();
-      updateDoneCount();
-    }}
-
-    function moveToDone(card, id) {{
-      // Hide the done button, add an undo button
-      const doneBtn = card.querySelector('.done-btn');
-      if (doneBtn) doneBtn.style.display = 'none';
-      if (!card.querySelector('.undo-btn-inline')) {{
-        const undo = document.createElement('button');
-        undo.className = 'done-btn undo-btn-inline';
-        undo.textContent = '↩ Restore';
-        undo.onclick = () => undoItem(id);
-        card.querySelector('.card-actions').appendChild(undo);
-      }}
-      document.getElementById('done-cards').prepend(card);
-    }}
-
-    function updateCount() {{
-      const visible = document.querySelectorAll('#action-cards .card').length;
-      const el = document.getElementById('remaining');
-      if (el) el.textContent = visible;
-      const banner = document.getElementById('banner');
-      if (banner && visible === 0) {{
-        banner.className = 'count-banner zero';
-        banner.innerHTML = '🎉 All caught up!';
-      }} else if (banner && el) {{
-        banner.className = 'count-banner';
-      }}
-    }}
-
-    function updateDoneCount() {{
-      const n = document.querySelectorAll('#done-cards .card').length;
-      document.getElementById('done-count').textContent = n;
-    }}
 
     function expandThread(btn) {{
       const msg = btn.closest('.thread-msg');
@@ -599,31 +511,6 @@ def render_html(items, stats):
       btn.textContent = open ? '▶ Show liked comments' : '▼ Hide liked comments';
     }}
 
-    function toggleDone(btn) {{
-      const section = document.getElementById('done-section');
-      const open = section.style.display === 'block';
-      section.style.display = open ? 'none' : 'block';
-      btn.firstChild.textContent = open ? '▶ ' : '▼ ';
-    }}
-
-    function clearDone() {{
-      if (confirm('Move all done items back to your list?')) {{
-        const cards = [...document.querySelectorAll('#done-cards .card')];
-        cards.forEach(card => {{
-          const id = card.dataset.id;
-          undoItem(id);
-        }});
-      }}
-    }}
-
-    // Apply saved done state on load
-    const done = getDone();
-    done.forEach(id => {{
-      const card = document.querySelector(`#action-cards [data-id="${{id}}"]`);
-      if (card) moveToDone(card, id);
-    }});
-    updateCount();
-    updateDoneCount();
 
     // Restore last sync log if present
     (function() {{
