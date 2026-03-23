@@ -91,7 +91,7 @@ def check_dashboard_loads_data():
         stats = dashboard.load_stats(conn)
     assert isinstance(items, list), "load_data did not return a list"
     assert "activity_items" in stats, "load_stats missing activity_items"
-    assert "last_sync" in stats, "load_stats missing last_sync"
+    assert "synced_up_to" in stats, "load_stats missing synced_up_to"
     return f"{len(items)} items needing response"
 
 def check_dashboard_renders():

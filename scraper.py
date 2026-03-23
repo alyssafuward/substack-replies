@@ -215,8 +215,8 @@ def recheck_unresponded(conn):
         key = (subdomain, post_id)
         groups.setdefault(key, []).append((item_id, comment_id))
 
-    print(f"{ts()} Rechecking {len(rows)} items across {len(groups)} posts...")
-    still_unresponded = 0
+    print(f"{ts()} Rechecking {len(rows)} items...")
+    still_unresponded = skip_count
     newly_responded = 0
 
     for (subdomain, post_id), items in groups.items():
