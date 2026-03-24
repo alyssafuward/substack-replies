@@ -25,26 +25,31 @@ def _escape(s):
 def load_response_rate(conn):
     """Return response rate stats across all activity replies."""
     rows = conn.execute(
-        "SELECT id, comment_id FROM activity_items WHERE type IN ('note_reply','comment_reply')"
+        "SELECT id, comment_id, is_responded FROM activity_items WHERE type IN ('note_reply','comment_reply')"
     ).fetchall()
 
     total = 0
     replied = 0
     liked_only = 0
 
-    for _, reply_id in rows:
+    for _, reply_id, is_responded in rows:
         if not reply_id:
             continue
         total += 1
-        # Check if you replied
-        your_reply = conn.execute(
-            "SELECT id FROM comments WHERE user_id=? AND ancestor_path LIKE ? AND id > ?",
-            (USER_ID, f"%{reply_id}%", reply_id)
-        ).fetchone()
-        if your_reply:
+
+        # Check if you responded: is_responded flag (set by recheck) OR response comment in DB
+        has_response = bool(is_responded)
+        if not has_response:
+            has_response = bool(conn.execute(
+                "SELECT id FROM comments WHERE user_id=? AND ancestor_path LIKE ? AND id > ?",
+                (USER_ID, f"%{reply_id}%", reply_id)
+            ).fetchone())
+
+        if has_response:
             replied += 1
             continue
-        # Check if you liked (acknowledged)
+
+        # Only liked, no response
         raw = conn.execute("SELECT raw_json FROM comments WHERE id=?", (reply_id,)).fetchone()
         if raw:
             data = json.loads(raw[0] or "{}")
@@ -195,16 +200,16 @@ def render_response_rate(data):
       <div class="card-title">Response Rate</div>
       <div class="rate-row">
         <div class="rate-number">{rate}%</div>
-        <div class="rate-label">of replies directly answered</div>
+        <div class="rate-label">of replies directly responded to</div>
       </div>
       <div class="stack-bar">
-        <div class="stack-seg" style="width:{replied_pct}%; background:#22c55e;" title="Replied: {replied}"></div>
-        <div class="stack-seg" style="width:{liked_pct}%; background:#f59e0b;" title="Liked (acknowledged): {liked}"></div>
+        <div class="stack-seg" style="width:{replied_pct}%; background:#22c55e;" title="Responded: {replied}"></div>
+        <div class="stack-seg" style="width:{liked_pct}%; background:#f59e0b;" title="Liked only (no reply): {liked}"></div>
         <div class="stack-seg" style="width:{unanswered_pct}%; background:#e5e5e5;" title="Unanswered: {unanswered}"></div>
       </div>
       <div class="stack-legend">
-        <span class="legend-dot" style="background:#22c55e;"></span> Replied ({replied})
-        <span class="legend-dot" style="background:#f59e0b; margin-left:12px;"></span> Liked/acknowledged ({liked})
+        <span class="legend-dot" style="background:#22c55e;"></span> Responded ({replied})
+        <span class="legend-dot" style="background:#f59e0b; margin-left:12px;"></span> Liked only — no reply ({liked})
         <span class="legend-dot" style="background:#ccc; margin-left:12px;"></span> Unanswered ({unanswered})
       </div>
       <div class="rate-sub">Based on {total} note and comment replies in your activity feed</div>
