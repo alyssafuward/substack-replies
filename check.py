@@ -71,6 +71,8 @@ def check_scraper_imports():
     assert hasattr(scraper, "sync_activity_feed"), "sync_activity_feed missing"
     assert hasattr(scraper, "sync_own_pubs"), "sync_own_pubs missing"
     assert hasattr(scraper, "init_db"), "init_db missing"
+    assert hasattr(scraper, "load_next_post"), "load_next_post missing"
+    assert hasattr(scraper, "refresh_post_comments"), "refresh_post_comments missing"
     return "all expected functions present"
 
 check("scraper.py imports cleanly", check_scraper_imports)
@@ -81,6 +83,7 @@ def check_dashboard_imports():
     import dashboard
     assert hasattr(dashboard, "load_data"), "load_data missing"
     assert hasattr(dashboard, "load_stats"), "load_stats missing"
+    assert hasattr(dashboard, "load_post_comments_data"), "load_post_comments_data missing"
     assert hasattr(dashboard, "render_html"), "render_html missing"
     return "all expected functions present"
 

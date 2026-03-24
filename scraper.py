@@ -619,6 +619,132 @@ def flatten_comments(comments):
             result.extend(flatten_comments([child]))
     return result
 
+
+# ── Post Comments Tab ─────────────────────────────────────────────────────────
+
+def load_next_post(conn, pub_subdomain):
+    """
+    Fetch and store the next unloaded post for a publication (newest first).
+    Uses a per-pub offset stored in sync_state to track progress.
+    Returns the post dict, or None if no more posts.
+    """
+    offset_key = f"post_offset_{pub_subdomain}"
+    offset = int(get_state(conn, offset_key) or 0)
+
+    url = f"https://{pub_subdomain}.substack.com/api/v1/posts"
+    batch = get(url, {"limit": 1, "offset": offset})
+
+    if not batch:
+        print(f"{ts()} No more posts to load for {pub_subdomain}.")
+        return None
+
+    post = batch[0]
+    post_id = post["id"]
+    post_title = post.get("title", "")
+    post_url = post.get("canonical_url", f"https://{pub_subdomain}.substack.com/p/{post.get('slug','')}")
+
+    conn.execute("""
+        INSERT OR REPLACE INTO posts (id, pub_subdomain, title, slug, canonical_url, post_date, comment_count)
+        VALUES (?,?,?,?,?,?,?)
+    """, (post_id, pub_subdomain, post_title, post.get("slug"), post_url,
+          post.get("post_date"), post.get("comment_count", 0)))
+
+    comments = fetch_post_comments(pub_subdomain, post_id)
+    flat = flatten_comments(comments)
+    for c in flat:
+        _store_comment(conn, c, pub_subdomain=pub_subdomain, post_id=post_id,
+                       post_title=post_title, post_url=post_url)
+
+    set_state(conn, offset_key, str(offset + 1))
+    conn.commit()
+    print(f"{ts()} Loaded post: \"{post_title}\" ({len(flat)} comments)")
+    return post
+
+
+def load_posts_to_target(conn, pub_subdomain, target=25):
+    """
+    Load posts one by one (newest first) until cumulative unanswered comments
+    reach `target`, or no more posts remain.
+    Prints progress for SSE streaming.
+    """
+    print(f"{ts()} Loading posts for {pub_subdomain} (target: {target} unanswered)...")
+    total_unanswered = 0
+    posts_loaded = 0
+
+    while total_unanswered < target:
+        post = load_next_post(conn, pub_subdomain)
+        if not post:
+            print(f"{ts()} No more posts to load.")
+            break
+
+        posts_loaded += 1
+        post_id = post["id"]
+        post_title = post.get("title", str(post_id))
+
+        # Count unanswered comments on this post (not by user, not replied to)
+        post_unanswered = conn.execute("""
+            SELECT COUNT(*) FROM comments c
+            WHERE c.post_id = ?
+              AND c.user_id != ?
+              AND c.user_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM comments r
+                WHERE r.user_id = ?
+                  AND (r.ancestor_path = CAST(c.id AS TEXT)
+                       OR r.ancestor_path LIKE '%.' || CAST(c.id AS TEXT)
+                       OR r.ancestor_path LIKE CAST(c.id AS TEXT) || '.%')
+              )
+        """, (post_id, USER_ID, USER_ID)).fetchone()[0]
+
+        total_unanswered += post_unanswered
+        print(f"{ts()}   \"{post_title[:50]}\": {post_unanswered} unanswered (running total: {total_unanswered})")
+
+        if total_unanswered >= target:
+            print(f"{ts()} Reached target. {posts_loaded} posts loaded, {total_unanswered} unanswered comments.")
+            break
+
+        time.sleep(0.5)
+
+    if total_unanswered < target:
+        print(f"{ts()} Done: {posts_loaded} posts loaded, {total_unanswered} unanswered comments total.")
+
+
+def refresh_post_comments(conn, pub_subdomain):
+    """
+    Re-fetch comments for all loaded posts in a publication.
+    Updates existing comment records with fresh data (picks up new reactions/replies).
+    """
+    posts = conn.execute("""
+        SELECT id, title, canonical_url FROM posts
+        WHERE pub_subdomain=? ORDER BY post_date DESC
+    """, (pub_subdomain,)).fetchall()
+
+    if not posts:
+        print(f"{ts()} No posts loaded for {pub_subdomain}.")
+        return
+
+    print(f"{ts()} Refreshing {len(posts)} posts in {pub_subdomain}...")
+    for post_id, post_title, post_url in posts:
+        try:
+            comments = fetch_post_comments(pub_subdomain, post_id)
+            flat = flatten_comments(comments)
+            for c in flat:
+                existing = conn.execute("SELECT id FROM comments WHERE id=?", (c["id"],)).fetchone()
+                if existing:
+                    conn.execute("UPDATE comments SET raw_json=?, body=? WHERE id=?",
+                                 (json.dumps(c), c.get("body", ""), c["id"]))
+                else:
+                    _store_comment(conn, c, pub_subdomain=pub_subdomain, post_id=post_id,
+                                   post_title=post_title, post_url=post_url)
+            conn.commit()
+            print(f"{ts()}   \"{post_title or post_id}\": {len(flat)} comments")
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"{ts()}   warning: couldn't refresh post {post_id}: {e}")
+
+    print(f"{ts()} Post refresh complete.")
+
+
 # ── Report ────────────────────────────────────────────────────────────────────
 
 def report(conn):
@@ -781,6 +907,15 @@ def main():
             args.discard("--count")
             args.discard(argv[idx + 1])
 
+    # Parse --pub SUBDOMAIN (for post-comments commands)
+    pub = None
+    if "--pub" in argv:
+        idx = argv.index("--pub")
+        if idx + 1 < len(argv):
+            pub = argv[idx + 1]
+            args.discard("--pub")
+            args.discard(argv[idx + 1])
+
     # Parse --as-of YYYY-MM-DD (simulate syncing as of a past date)
     as_of_date = None
     as_of_cursor = None
@@ -795,11 +930,31 @@ def main():
             args.discard(as_of_date)
 
     if not args:
-        print("Usage: python scraper.py [sync] [report] [--as-of YYYY-MM-DD]")
+        print("Usage: python scraper.py [sync] [report] [load-post --pub X] [sync-posts --pub X] [--as-of YYYY-MM-DD]")
         sys.exit(0)
 
     with sqlite3.connect(DB_PATH) as conn:
         init_db(conn)
+
+        if "load-posts" in args:
+            if not pub:
+                print("Error: --pub required for load-posts")
+                sys.exit(1)
+            load_posts_to_target(conn, pub, target=count)
+
+        if "load-post" in args:
+            if not pub:
+                print("Error: --pub required for load-post")
+                sys.exit(1)
+            post = load_next_post(conn, pub)
+            if not post:
+                print(f"{ts()} No more posts to load for {pub}.")
+
+        if "sync-posts" in args:
+            if not pub:
+                print("Error: --pub required for sync-posts")
+                sys.exit(1)
+            refresh_post_comments(conn, pub)
 
         if "sync" in args:
             if as_of_date:

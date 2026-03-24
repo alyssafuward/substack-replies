@@ -1,4 +1,4 @@
-replies.db
+replies.db*
 .env
 config.py
 *.json

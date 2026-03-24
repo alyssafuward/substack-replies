@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    from config import USER_ID
+    from config import USER_ID, OWN_PUBS
 except ImportError:
     print("Error: config.py not found. Copy config.example.py to config.py and fill in your values.")
     sys.exit(1)
@@ -189,6 +189,67 @@ def load_stats(conn):
         "synced_up_to": _format_sync_time(synced_up_to[0]) if synced_up_to else "never",
     }
 
+def load_post_comments_data(conn, pub_subdomain):
+    """Return loaded posts with their unanswered/liked comments for Tab 2."""
+    if not pub_subdomain:
+        return []
+
+    posts = conn.execute("""
+        SELECT id, title, canonical_url, post_date
+        FROM posts WHERE pub_subdomain=?
+        ORDER BY post_date DESC
+    """, (pub_subdomain,)).fetchall()
+
+    result = []
+    for post_id, title, url, post_date in posts:
+        comment_rows = conn.execute("""
+            SELECT c.id, c.name, c.handle, c.body, c.date, c.raw_json
+            FROM comments c
+            WHERE c.post_id=? AND c.user_id != ? AND c.user_id IS NOT NULL
+            ORDER BY c.date DESC
+        """, (post_id, USER_ID)).fetchall()
+
+        unanswered = []
+        liked_list = []
+
+        for cid, name, handle, body, date, raw_json_str in comment_rows:
+            your_reply = conn.execute("""
+                SELECT id FROM comments
+                WHERE user_id=? AND (ancestor_path=? OR ancestor_path LIKE ?)
+            """, (USER_ID, str(cid), f"%.{cid}%")).fetchone()
+            if your_reply:
+                continue
+
+            raw = json.loads(raw_json_str or "{}")
+            is_liked = bool(raw.get("reaction"))
+            link = f"{url.rstrip('/')}/comment/{cid}" if url else ""
+
+            c = {
+                "id": cid,
+                "who": name or handle or "Anonymous",
+                "body": body or "",
+                "date": (date or "")[:10],
+                "raw_date": date or "",
+                "link": link,
+                "liked": is_liked,
+            }
+            if is_liked:
+                liked_list.append(c)
+            else:
+                unanswered.append(c)
+
+        result.append({
+            "id": post_id,
+            "title": title or f"Post {post_id}",
+            "url": url or "",
+            "post_date": (post_date or "")[:10],
+            "unanswered": unanswered,
+            "liked": liked_list,
+        })
+
+    return result
+
+
 # ── HTML ──────────────────────────────────────────────────────────────────────
 
 def escape(s):
@@ -284,8 +345,94 @@ def render_card(item, section="action"):
     </div>
     """
 
-def render_html(items, stats):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+def render_post_comment_card(c):
+    who = escape(c["who"])
+    date = escape(format_date(c.get("raw_date", c["date"])))
+    body = escape(c["body"][:200] + ("..." if len(c["body"]) > 200 else ""))
+    link = c.get("link", "")
+    liked = c.get("liked", False)
+
+    liked_badge = '<span class="liked-badge">❤️ liked</span>' if liked else ""
+    link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open →</a>' if link else ""
+
+    return f"""    <div class="post-comment-card">
+      <div class="card-header">
+        <div class="card-meta">{liked_badge}<span class="date">{date}</span></div>
+        <div class="card-actions">{link_html}</div>
+      </div>
+      <div class="who">{who}</div>
+      <div class="their-content">{body}</div>
+    </div>"""
+
+
+def render_post_section(post):
+    title = escape(post["title"])
+    url = post["url"]
+    post_date = escape(post["post_date"])
+    unanswered = post["unanswered"]
+    liked = post["liked"]
+
+    title_link = f'<a href="{escape(url)}" target="_blank">{title}</a>' if url else title
+    header = f'<div class="post-header"><span class="post-title">{title_link}</span><span class="post-date">{post_date}</span></div>'
+
+    if not unanswered and not liked:
+        body = '<div class="post-empty">No unanswered comments</div>'
+    else:
+        body = "\n".join(render_post_comment_card(c) for c in unanswered)
+        if liked:
+            liked_html = "\n".join(render_post_comment_card(c) for c in liked)
+            body += f"""
+      <div class="toggle-section" style="margin-top:8px;">
+        <button class="toggle-btn" onclick="toggleSection(this)">▶ Show liked comments ({len(liked)})</button>
+        <div class="liked-section" style="display:none;">{liked_html}</div>
+      </div>"""
+
+    return f'<div class="post-section">{header}{body}</div>'
+
+
+def render_post_comments_tab(posts_data, pub_subdomain):
+    total = sum(len(p["unanswered"]) for p in posts_data)
+    posts_html = "\n".join(render_post_section(p) for p in posts_data)
+    pub_esc = escape(pub_subdomain)
+
+    if not posts_data:
+        banner_html = ""
+    elif total == 0:
+        banner_html = '<div class="count-banner zero" style="margin-bottom:16px;">🎉 All caught up!</div>'
+    else:
+        banner_html = f'<div class="count-banner" style="margin-bottom:16px;">⚡ <span>{total}</span> {"comment" if total == 1 else "comments"} need your response</div>'
+
+    empty_html = "" if posts_data else '<div class="empty" style="margin-top:40px;">No posts loaded yet — click <strong>Load more posts</strong> to get started.</div>'
+
+    return f"""  <div class="posts-controls">
+    <div class="sync-row">
+      <label style="font-size:0.82rem; color:#666;">Load until:</label>
+      <select id="load-count-{pub_esc}" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
+        <option value="10">10 unanswered</option>
+        <option value="25" selected>25 unanswered</option>
+        <option value="50">50 unanswered</option>
+        <option value="100">100 unanswered</option>
+      </select>
+      <button class="load-more-link" id="load-btn-{pub_esc}" onclick="startLoadPosts(this, '{pub_esc}')">Load posts</button>
+      <button class="sync-btn" id="posts-sync-btn-{pub_esc}" onclick="startPostsSync('{pub_esc}')">Sync</button>
+      <button class="sync-btn" id="load-stop-btn-{pub_esc}" onclick="stopPostsLoad('{pub_esc}')" style="display:none; background:#888;">Stop</button>
+      <button class="sync-btn" id="posts-stop-btn-{pub_esc}" onclick="stopPostsSync('{pub_esc}')" style="display:none; background:#888;">Stop</button>
+      <span class="sync-status" id="posts-sync-status-{pub_esc}"></span>
+    </div>
+    <pre class="sync-log" id="posts-sync-log-{pub_esc}" style="display:none"></pre>
+    <div id="last-posts-sync-log-wrap-{pub_esc}" style="display:none; margin-top:6px;">
+      <button onclick="toggleLastPostsLog(this, '{pub_esc}')" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
+      <pre class="sync-log" id="last-posts-sync-log-{pub_esc}" style="display:none; margin-top:4px;"></pre>
+    </div>
+  </div>
+  {banner_html}
+  {posts_html}
+  {empty_html}"""
+
+
+def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None):
+    all_posts_data = all_posts_data or {}
+    all_pubs = all_pubs or []
 
     needs_response = [i for i in items if not i.get("liked")]
     reviewed = [i for i in items if i.get("liked")]
@@ -296,6 +443,15 @@ def render_html(items, stats):
     count = len(needs_response)
     reviewed_count = len(reviewed)
     empty_msg = "" if count else '<div class="empty">🎉 All caught up!</div>'
+
+    pub_tabs_html = "\n".join(
+        f'<button class="tab-btn" id="tab-btn-{escape(p)}" onclick="switchTab(\'{escape(p)}\')">{escape(p)}</button>'
+        for p in all_pubs
+    )
+    pub_contents_html = "\n".join(
+        f'<div id="tab-content-{escape(p)}" style="display:none">{render_post_comments_tab(all_posts_data.get(p, []), p)}</div>'
+        for p in all_pubs
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -309,7 +465,7 @@ def render_html(items, stats):
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: #f5f4f0; color: #1a1a1a; padding: 24px;
     }}
-    .header {{ max-width: 720px; margin: 0 auto 20px; }}
+    .header {{ max-width: 720px; margin: 0 auto 16px; }}
     h1 {{ font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }}
     .subtitle {{ color: #666; font-size: 0.9rem; }}
     .stats {{ display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }}
@@ -318,7 +474,18 @@ def render_html(items, stats):
       font-size: 0.8rem; color: #555; border: 1px solid #e5e5e5;
     }}
     .stat strong {{ color: #1a1a1a; font-size: 1rem; display: block; }}
-    .sync-row {{ display: flex; align-items: center; gap: 10px; margin-top: 14px; }}
+    .tab-nav {{
+      max-width: 720px; margin: 0 auto 20px;
+      border-bottom: 2px solid #e5e5e5; display: flex;
+    }}
+    .tab-btn {{
+      background: none; border: none; cursor: pointer;
+      font-size: 0.9rem; font-weight: 600; color: #aaa;
+      padding: 8px 18px; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    }}
+    .tab-btn.active {{ color: #1a1a1a; border-bottom-color: #ff3300; }}
+    .tab-btn:hover:not(.active) {{ color: #666; }}
+    .sync-row {{ display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }}
     .sync-btn {{
       background: #ff3300; color: white; border: none; border-radius: 6px;
       padding: 6px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
@@ -331,6 +498,12 @@ def render_html(items, stats):
       font-size: 0.75rem; border-radius: 6px; max-height: 200px; overflow-y: auto;
       white-space: pre-wrap; word-break: break-all;
     }}
+    .load-more-link {{
+      font-size: 0.85rem; font-weight: 600; color: #1a1a1a;
+      background: white; border: 1px solid #ccc; border-radius: 6px;
+      padding: 5px 14px; text-decoration: none; white-space: nowrap;
+    }}
+    .load-more-link:hover {{ background: #f5f5f5; color: #1a1a1a; }}
     .count-banner {{
       max-width: 720px; margin: 0 auto 20px;
       background: #ff3300; color: white;
@@ -344,7 +517,6 @@ def render_html(items, stats):
       border: 1px solid #e5e5e5; transition: box-shadow 0.15s;
     }}
     .card:hover {{ box-shadow: 0 2px 12px rgba(0,0,0,0.07); }}
-
     .card-header {{
       display: flex; justify-content: space-between; align-items: center;
       margin-bottom: 10px; gap: 8px;
@@ -365,7 +537,6 @@ def render_html(items, stats):
       font-size: 0.82rem; color: #cc3300; text-decoration: none; font-weight: 500; white-space: nowrap;
     }}
     .reply-link:hover {{ text-decoration: underline; }}
-
     .who {{ font-weight: 600; font-size: 0.97rem; margin-bottom: 8px; }}
     .label {{ font-weight: 400; color: #666; }}
     .field-label {{ font-size: 0.72rem; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 4px; }}
@@ -373,9 +544,7 @@ def render_html(items, stats):
       font-size: 0.85rem; color: #888; margin-bottom: 8px;
       padding: 7px 11px; background: #fafafa; border-radius: 6px; border-left: 3px solid #e0e0e0;
     }}
-    .thread-context {{
-      margin-bottom: 8px;
-    }}
+    .thread-context {{ margin-bottom: 8px; }}
     .thread-toggle {{
       background: none; border: none; cursor: pointer;
       font-size: 0.75rem; color: #bbb; padding: 0 0 4px 0;
@@ -395,9 +564,7 @@ def render_html(items, stats):
       padding: 7px 11px; background: #fef8f6; border-radius: 6px; border-left: 3px solid #ff3300;
     }}
     .empty {{ max-width: 720px; margin: 40px auto; text-align: center; font-size: 1.1rem; color: #555; }}
-    .toggle-section {{
-      max-width: 720px; margin: 28px auto 12px;
-    }}
+    .toggle-section {{ max-width: 720px; margin: 16px auto 0; }}
     .toggle-btn {{
       background: none; border: none; cursor: pointer;
       font-size: 0.82rem; font-weight: 700; color: #aaa;
@@ -421,7 +588,25 @@ def render_html(items, stats):
     .liked-section {{ display: none; margin-top: 10px; }}
     .liked-section .card {{ opacity: 0.55; background: #fafafa; }}
     .liked-section .card:hover {{ opacity: 0.8; }}
-
+    .post-section {{
+      background: white; border-radius: 10px; padding: 16px 18px;
+      border: 1px solid #e5e5e5; margin-bottom: 12px;
+      max-width: 720px; margin-left: auto; margin-right: auto;
+    }}
+    .post-header {{
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;
+    }}
+    .post-title {{ font-weight: 700; font-size: 1rem; }}
+    .post-title a {{ color: #1a1a1a; text-decoration: none; }}
+    .post-title a:hover {{ text-decoration: underline; }}
+    .post-date {{ font-size: 0.8rem; color: #bbb; flex-shrink: 0; margin-left: 12px; }}
+    .post-empty {{ font-size: 0.85rem; color: #aaa; padding: 4px 0; }}
+    .post-comment-card {{
+      padding: 10px 0; border-bottom: 1px solid #f5f5f5;
+    }}
+    .post-comment-card:last-child {{ border-bottom: none; }}
+    .posts-controls {{ max-width: 720px; margin: 0 auto 20px; }}
     a {{ color: #bbb; }}
   </style>
 </head>
@@ -433,52 +618,162 @@ def render_html(items, stats):
       <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
     </div>
-    <div class="sync-row">
-      <label style="font-size:0.82rem; color:#666;">New replies to sync:</label>
-      <select id="sync-count" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
-        <option value="25" selected>25</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-        <option value="200">200</option>
-        <option value="250">250</option>
-      </select>
-      <button class="sync-btn" id="sync-btn" onclick="startSync()">Sync</button>
-      <button class="sync-btn" id="stop-btn" onclick="stopSync()" style="display:none; background:#888;">Stop</button>
-      <span class="sync-status" id="sync-status"></span>
-    </div>
-    <pre class="sync-log" id="sync-log" style="display:none"></pre>
-    <div id="last-sync-log-wrap" style="display:none; margin-top:6px;">
-      <button onclick="toggleLastLog(this)" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
-      <pre class="sync-log" id="last-sync-log" style="display:none; margin-top:4px;"></pre>
-    </div>
   </div>
 
   <div class="intro">
-    Never miss a reply across your Substack publications. Substack Replies collects comments and replies waiting for your response and surfaces them in one place — no more digging through your inbox.
+    Track and respond to comments across your Substack publications. <strong>Replies</strong> shows activity from your notes and comments. Each publication tab shows unanswered comments on your posts — load posts to build up the list, sync to refresh.
     <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
     <div class="how-it-works" id="how-it-works">
-      <h3>What you're seeing</h3>
-      This list shows comments and replies across your publications that haven't been addressed yet. Click <strong>Open on Substack →</strong> to jump directly to a comment and respond.
-      <h3>Liked comments</h3>
-      By default, if you've liked a comment on Substack, Substack Replies takes that as a signal the comment has been acknowledged and hides it from your list. To show all unanswered replies regardless of likes, toggle <strong>Show liked comments</strong> below.
-      <h3>Keeping your data fresh</h3>
-      Use the <strong>Sync</strong> button above to pull in the latest replies and recheck which ones you've responded to or liked.
+      <h3>Replies tab</h3>
+      Shows notes and comments across Substack where someone replied to you and you haven't responded yet.
+      <h3>Publication tabs</h3>
+      Shows unanswered comments on your own posts. Click <strong>Load posts</strong> to fetch posts (newest first) until you hit your target count of unanswered comments. <strong>Sync</strong> refreshes already-loaded posts with the latest comments.
+      <h3>Liked = acknowledged</h3>
+      If you've liked a comment on Substack, it's treated as acknowledged and moved to a collapsed section rather than shown as needing a response.
+      <h3>Keeping data fresh</h3>
+      Data lives in a local database and persists across page refreshes. Use Sync to update it.
     </div>
   </div>
 
-  <div class="count-banner {'zero' if count == 0 else ''}" id="banner">
-    {"🎉 All caught up!" if count == 0 else f"⚡ <span id='remaining'>{count}</span> {'reply' if count == 1 else 'replies'} need your response"}
+  <div id="sync-busy-banner" style="display:none; max-width:720px; margin:0 auto 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px 16px; font-size:0.88rem; color:#856404;">
+    A sync is already in progress. Please wait for it to finish before starting another.
   </div>
 
-  <div class="cards" id="action-cards">
-    {action_cards}
-    {empty_msg}
+  <div class="tab-nav">
+    <button class="tab-btn" id="tab-btn-replies" onclick="switchTab('replies')">Replies</button>
+    {pub_tabs_html}
   </div>
 
-  {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Show liked comments (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
+  <div id="tab-replies">
+    <div style="max-width:720px; margin:0 auto;">
+      <div class="sync-row">
+        <label style="font-size:0.82rem; color:#666;">New replies to sync:</label>
+        <select id="sync-count" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="250">250</option>
+        </select>
+        <button class="sync-btn" id="sync-btn" onclick="startSync()">Sync</button>
+        <button class="sync-btn" id="stop-btn" onclick="stopSync()" style="display:none; background:#888;">Stop</button>
+        <span class="sync-status" id="sync-status"></span>
+      </div>
+      <pre class="sync-log" id="sync-log" style="display:none"></pre>
+      <div id="last-sync-log-wrap" style="display:none; margin-top:6px;">
+        <button onclick="toggleLastLog(this)" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
+        <pre class="sync-log" id="last-sync-log" style="display:none; margin-top:4px;"></pre>
+      </div>
+    </div>
 
+    <div class="count-banner {'zero' if count == 0 else ''}" id="banner">
+      {"🎉 All caught up!" if count == 0 else f"⚡ <span id='remaining'>{count}</span> {'reply' if count == 1 else 'replies'} need your response"}
+    </div>
+
+    <div class="cards" id="action-cards">
+      {action_cards}
+      {empty_msg}
+    </div>
+
+    {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Show liked comments (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
+  </div>
+
+  {pub_contents_html}
 
   <script>
+    const initTab = "{active_tab}";
+
+    const allPubs = {json.dumps(all_pubs)};
+
+    function switchTab(tab) {{
+      // Hide all tabs
+      document.getElementById('tab-replies').style.display = 'none';
+      allPubs.forEach(p => {{
+        const el = document.getElementById('tab-content-' + p);
+        if (el) el.style.display = 'none';
+        const btn = document.getElementById('tab-btn-' + p);
+        if (btn) btn.classList.remove('active');
+      }});
+      document.getElementById('tab-btn-replies').classList.remove('active');
+
+      // Show active tab
+      if (tab === 'replies') {{
+        document.getElementById('tab-replies').style.display = '';
+        document.getElementById('tab-btn-replies').classList.add('active');
+      }} else {{
+        const el = document.getElementById('tab-content-' + tab);
+        if (el) el.style.display = '';
+        const btn = document.getElementById('tab-btn-' + tab);
+        if (btn) btn.classList.add('active');
+      }}
+
+      localStorage.setItem('activeTab', tab);
+      const url = new URL(window.location);
+      url.searchParams.set('tab', tab);
+      history.replaceState({{}}, '', url);
+    }}
+
+    let _loadEs = null;
+
+    function startLoadPosts(btn, pub) {{
+      const count = document.getElementById('load-count-' + pub).value;
+      const stopBtn = document.getElementById('load-stop-btn-' + pub);
+      const status = document.getElementById('posts-sync-status-' + pub);
+      const log = document.getElementById('posts-sync-log-' + pub);
+      btn.style.display = 'none';
+      stopBtn.style.display = '';
+      status.textContent = 'Loading…';
+      // Don't clear the log until we know the sync actually started
+      log.style.display = 'block';
+
+      _loadEs = new EventSource('/posts/load?pub=' + encodeURIComponent(pub) + '&count=' + count);
+      _loadEs.onmessage = function(e) {{
+        if (e.data === '__done__') {{
+          _loadEs.close(); _loadEs = null;
+          localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
+          status.textContent = 'Done — reloading…';
+          setTimeout(() => window.location.href = '/?tab=' + encodeURIComponent(pub), 1500);
+          return;
+        }}
+        if (e.data === '__error__') {{
+          _loadEs.close(); _loadEs = null;
+          btn.style.display = ''; stopBtn.style.display = 'none';
+          log.style.display = 'none';
+          status.textContent = 'Sync already in progress — try again when it finishes.';
+          return;
+        }}
+        if (!log.dataset.started) {{
+          log.textContent = '';
+          log.dataset.started = '1';
+        }}
+        log.textContent += e.data + '\\n';
+        log.scrollTop = log.scrollHeight;
+        status.textContent = e.data;
+        localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
+      }};
+      _loadEs.onerror = function() {{
+        _loadEs.close(); _loadEs = null;
+        btn.style.display = ''; stopBtn.style.display = 'none';
+        status.textContent = 'Error — check terminal';
+      }};
+    }}
+
+    function stopPostsLoad(pub) {{
+      if (_loadEs) {{ _loadEs.close(); _loadEs = null; }}
+      fetch('/sync/stop', {{method: 'POST'}});
+      document.getElementById('load-btn-' + pub).style.display = '';
+      document.getElementById('load-stop-btn-' + pub).style.display = 'none';
+      document.getElementById('posts-sync-status-' + pub).textContent = 'Stopped.';
+    }}
+
+    function toggleSection(btn) {{
+      const section = btn.nextElementSibling;
+      const open = section.style.display === 'block';
+      section.style.display = open ? 'none' : 'block';
+      btn.textContent = open
+        ? btn.textContent.replace('▼', '▶').replace('Hide', 'Show')
+        : btn.textContent.replace('▶', '▼').replace('Show', 'Hide');
+    }}
 
     function expandThread(btn) {{
       const msg = btn.closest('.thread-msg');
@@ -511,7 +806,6 @@ def render_html(items, stats):
       btn.textContent = open ? '▶ Show liked comments' : '▼ Hide liked comments';
     }}
 
-
     // Restore last sync log if present
     (function() {{
       const saved = localStorage.getItem('lastSyncLog');
@@ -521,10 +815,25 @@ def render_html(items, stats):
         pre.textContent = saved;
         wrap.style.display = '';
       }}
+      allPubs.forEach(p => {{
+        const savedPosts = localStorage.getItem('lastPostsSyncLog_' + p);
+        if (savedPosts) {{
+          const wrap = document.getElementById('last-posts-sync-log-wrap-' + p);
+          const pre = document.getElementById('last-posts-sync-log-' + p);
+          if (wrap && pre) {{ pre.textContent = savedPosts; wrap.style.display = ''; }}
+        }}
+      }});
     }})();
 
     function toggleLastLog(btn) {{
       const pre = document.getElementById('last-sync-log');
+      const open = pre.style.display === 'block';
+      pre.style.display = open ? 'none' : 'block';
+      btn.textContent = open ? '▶ Last sync log' : '▼ Last sync log';
+    }}
+
+    function toggleLastPostsLog(btn, pub) {{
+      const pre = document.getElementById('last-posts-sync-log-' + pub);
       const open = pre.style.display === 'block';
       pre.style.display = open ? 'none' : 'block';
       btn.textContent = open ? '▶ Last sync log' : '▼ Last sync log';
@@ -547,22 +856,26 @@ def render_html(items, stats):
       _es = new EventSource('/sync?count=' + count);
       _es.onmessage = function(e) {{
         if (e.data === '__done__') {{
-          _es.close();
-          _es = null;
+          _es.close(); _es = null;
           localStorage.setItem('lastSyncLog', log.textContent);
           status.textContent = 'Done — reloading…';
-          setTimeout(() => window.location.reload(), 1500);
+          setTimeout(() => window.location.href = '/?tab=replies', 1500);
+          return;
+        }}
+        if (e.data === '__error__') {{
+          _es.close(); _es = null;
+          btn.style.display = ''; stopBtn.style.display = 'none';
+          status.textContent = 'Could not start sync.';
           return;
         }}
         log.textContent += e.data + '\\n';
         log.scrollTop = log.scrollHeight;
         status.textContent = e.data;
+        localStorage.setItem('lastSyncLog', log.textContent);
       }};
       _es.onerror = function() {{
-        _es.close();
-        _es = null;
-        btn.style.display = '';
-        stopBtn.style.display = 'none';
+        _es.close(); _es = null;
+        btn.style.display = ''; stopBtn.style.display = 'none';
         status.textContent = 'Error — check terminal';
       }};
     }}
@@ -574,6 +887,74 @@ def render_html(items, stats):
       document.getElementById('stop-btn').style.display = 'none';
       document.getElementById('sync-status').textContent = 'Stopped.';
     }}
+
+    let _postsEs = null;
+
+    function startPostsSync(pub) {{
+      const btn = document.getElementById('posts-sync-btn-' + pub);
+      const stopBtn = document.getElementById('posts-stop-btn-' + pub);
+      const status = document.getElementById('posts-sync-status-' + pub);
+      const log = document.getElementById('posts-sync-log-' + pub);
+      btn.style.display = 'none';
+      stopBtn.style.display = '';
+      status.textContent = 'Starting…';
+      log.style.display = 'block';
+
+      _postsEs = new EventSource('/posts/sync?pub=' + encodeURIComponent(pub));
+      _postsEs.onmessage = function(e) {{
+        if (e.data === '__done__') {{
+          _postsEs.close(); _postsEs = null;
+          localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
+          status.textContent = 'Done — reloading…';
+          setTimeout(() => window.location.href = '/?tab=' + encodeURIComponent(pub), 1500);
+          return;
+        }}
+        if (e.data === '__error__') {{
+          _postsEs.close(); _postsEs = null;
+          btn.style.display = ''; stopBtn.style.display = 'none';
+          log.style.display = 'none';
+          status.textContent = 'Sync already in progress — try again when it finishes.';
+          return;
+        }}
+        if (!log.dataset.started) {{
+          log.textContent = '';
+          log.dataset.started = '1';
+        }}
+        log.textContent += e.data + '\\n';
+        log.scrollTop = log.scrollHeight;
+        status.textContent = e.data;
+        localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
+      }};
+      _postsEs.onerror = function() {{
+        _postsEs.close(); _postsEs = null;
+        btn.style.display = ''; stopBtn.style.display = 'none';
+        status.textContent = 'Error — check terminal';
+      }};
+    }}
+
+    function stopPostsSync(pub) {{
+      if (_postsEs) {{ _postsEs.close(); _postsEs = null; }}
+      fetch('/sync/stop', {{method: 'POST'}});
+      document.getElementById('posts-sync-btn-' + pub).style.display = '';
+      document.getElementById('posts-stop-btn-' + pub).style.display = 'none';
+      document.getElementById('posts-sync-status-' + pub).textContent = 'Stopped.';
+    }}
+
+    // Initialize tab from server-side value or localStorage
+    (function() {{
+      const tab = initTab || localStorage.getItem('activeTab') || 'replies';
+      switchTab(tab);
+    }})();
+
+    // Check if a sync is already running (another user may have started one)
+    fetch('/sync/status')
+      .then(r => r.json())
+      .then(data => {{
+        if (data.running) {{
+          document.getElementById('sync-busy-banner').style.display = '';
+        }}
+      }})
+      .catch(() => {{}});
   </script>
 </body>
 </html>"""
