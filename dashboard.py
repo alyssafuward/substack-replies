@@ -682,7 +682,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       {empty_msg}
     </div>
 
-    {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Show liked comments (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
+    {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Liked only — no reply (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
   </div>
 
   {pub_contents_html}
@@ -810,7 +810,26 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const section = document.getElementById('liked-section');
       const open = section.style.display === 'block';
       section.style.display = open ? 'none' : 'block';
-      btn.textContent = open ? '▶ Show liked comments' : '▼ Hide liked comments';
+      btn.textContent = open ? '▶ Liked only — no reply' : '▼ Liked only — no reply';
+    }}
+
+    (function initShowMore() {{
+      const SHOW = 10;
+      const cards = document.querySelectorAll('#action-cards .card');
+      if (cards.length <= SHOW) return;
+      for (let i = SHOW; i < cards.length; i++) {{
+        cards[i].classList.add('hidden-card');
+        cards[i].style.display = 'none';
+      }}
+      const btn = document.createElement('div');
+      btn.className = 'toggle-section';
+      btn.innerHTML = '<button class="toggle-btn" id="show-more-btn" onclick="showMoreCards(this)">▶ Show ' + (cards.length - SHOW) + ' more replies</button>';
+      document.getElementById('action-cards').after(btn);
+    }})();
+
+    function showMoreCards(btn) {{
+      document.querySelectorAll('#action-cards .hidden-card').forEach(c => c.style.display = '');
+      btn.closest('.toggle-section').remove();
     }}
 
     // Restore last sync log if present
