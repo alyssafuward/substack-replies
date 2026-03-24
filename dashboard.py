@@ -474,6 +474,12 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       font-size: 0.8rem; color: #555; border: 1px solid #e5e5e5;
     }}
     .stat strong {{ color: #1a1a1a; font-size: 1rem; display: block; }}
+    .stat-link {{
+      text-decoration: none; color: #cc3300;
+      border-color: #ffd5cc; background: #fff8f7;
+    }}
+    .stat-link strong {{ color: #cc3300; font-size: 1rem; }}
+    .stat-link:hover {{ background: #fff0ee; border-color: #ff3300; }}
     .tab-nav {{
       max-width: 720px; margin: 0 auto 20px;
       border-bottom: 2px solid #e5e5e5; display: flex;
@@ -617,6 +623,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
+      <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a>
     </div>
   </div>
 
