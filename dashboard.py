@@ -40,18 +40,20 @@ def load_data(conn):
 
     # 1. Note/comment replies from activity feed
     rows = conn.execute("""
-        SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
+        SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json, a.is_responded
         FROM activity_items a
         WHERE a.type IN ('note_reply', 'comment_reply')
         ORDER BY a.created_at DESC
     """).fetchall()
 
     for row in rows:
-        item_id, item_type, created_at, reply_id, your_id, raw = row
+        item_id, item_type, created_at, reply_id, your_id, raw, is_responded = row
         if not reply_id or not your_id:
             continue
 
-        # Check if you already replied back
+        # Check if you already replied back (recheck flag or response comment in DB)
+        if is_responded:
+            continue
         your_reply = conn.execute("""
             SELECT id FROM comments
             WHERE user_id = ? AND ancestor_path LIKE ? AND id > ?
