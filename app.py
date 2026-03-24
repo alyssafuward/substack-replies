@@ -10,43 +10,94 @@ Usage:
 import sqlite3
 import subprocess
 import sys
+import threading
 from pathlib import Path
-from flask import Flask, Response, request
+from flask import Flask, Response, request, redirect, jsonify
 
-from dashboard import load_data, load_stats, render_html
+from dashboard import load_data, load_stats, load_post_comments_data, render_html
+from scraper import init_db, load_next_post, refresh_post_comments
 
 app = Flask(__name__)
 DB_PATH = Path(__file__).parent / "replies.db"
+
 _sync_proc = None
+_sync_lock = threading.Lock()
 
 
-@app.route("/sync")
-def sync():
+def _try_start_sync(cmd):
+    """Start a subprocess if none is running. Returns (proc, error_str)."""
     global _sync_proc
-    count = request.args.get("count", 250, type=int)
-    def generate():
-        global _sync_proc
+    with _sync_lock:
+        if _sync_proc is not None and _sync_proc.poll() is None:
+            return None, "A sync is already in progress. Please wait for it to finish."
         _sync_proc = subprocess.Popen(
-            [sys.executable, "-u", "scraper.py", "sync", "--count", str(count)],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=Path(__file__).parent,
             text=True,
         )
-        for line in _sync_proc.stdout:
-            yield f"data: {line.rstrip()}\n\n"
-        _sync_proc.wait()
+        return _sync_proc, None
+
+
+def _finish_sync():
+    global _sync_proc
+    with _sync_lock:
         _sync_proc = None
-        yield "data: __done__\n\n"
-    return Response(generate(), mimetype="text/event-stream",
-                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+def _stream(cmd):
+    """SSE generator: starts a subprocess or yields an error if one is already running."""
+    proc, err = _try_start_sync(cmd)
+    if err:
+        yield f"data: ERROR: {err}\n\n"
+        yield "data: __error__\n\n"
+        return
+    for line in proc.stdout:
+        yield f"data: {line.rstrip()}\n\n"
+    proc.wait()
+    _finish_sync()
+    yield "data: __done__\n\n"
+
+
+_SSE_HEADERS = {"X-Accel-Buffering": "no", "Cache-Control": "no-cache"}
+
+
+@app.route("/sync/status")
+def sync_status():
+    with _sync_lock:
+        running = _sync_proc is not None and _sync_proc.poll() is None
+    return jsonify({"running": running})
+
+
+@app.route("/sync")
+def sync():
+    count = request.args.get("count", 250, type=int)
+    cmd = [sys.executable, "-u", "scraper.py", "sync", "--count", str(count)]
+    return Response(_stream(cmd), mimetype="text/event-stream", headers=_SSE_HEADERS)
+
+
+@app.route("/posts/load")
+def load_posts():
+    pub = request.args.get("pub", "")
+    count = request.args.get("count", 25, type=int)
+    cmd = [sys.executable, "-u", "scraper.py", "load-posts", "--pub", pub, "--count", str(count)]
+    return Response(_stream(cmd), mimetype="text/event-stream", headers=_SSE_HEADERS)
+
+
+@app.route("/posts/sync")
+def sync_posts():
+    pub = request.args.get("pub", "")
+    cmd = [sys.executable, "-u", "scraper.py", "sync-posts", "--pub", pub]
+    return Response(_stream(cmd), mimetype="text/event-stream", headers=_SSE_HEADERS)
 
 
 @app.route("/sync/stop", methods=["POST"])
 def sync_stop():
     global _sync_proc
-    if _sync_proc and _sync_proc.poll() is None:
-        _sync_proc.terminate()
+    with _sync_lock:
+        if _sync_proc and _sync_proc.poll() is None:
+            _sync_proc.terminate()
         _sync_proc = None
     return ("", 204)
 
@@ -55,10 +106,18 @@ def sync_stop():
 def index():
     if not DB_PATH.exists():
         return Response(render_empty(), mimetype="text/html")
+
+    from config import OWN_PUBS
+    all_pubs = list(OWN_PUBS.keys())
+    active_tab = request.args.get("tab", "replies")
+
     with sqlite3.connect(DB_PATH) as conn:
         items = load_data(conn)
         stats = load_stats(conn)
-    html = render_html(items, stats)
+        all_posts_data = {pub: load_post_comments_data(conn, pub) for pub in all_pubs}
+
+    html = render_html(items, stats, all_posts_data=all_posts_data,
+                       active_tab=active_tab, all_pubs=all_pubs)
     return Response(html, mimetype="text/html")
 
 
