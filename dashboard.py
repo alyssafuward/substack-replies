@@ -40,18 +40,20 @@ def load_data(conn):
 
     # 1. Note/comment replies from activity feed
     rows = conn.execute("""
-        SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
+        SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json, a.is_responded
         FROM activity_items a
         WHERE a.type IN ('note_reply', 'comment_reply')
         ORDER BY a.created_at DESC
     """).fetchall()
 
     for row in rows:
-        item_id, item_type, created_at, reply_id, your_id, raw = row
+        item_id, item_type, created_at, reply_id, your_id, raw, is_responded = row
         if not reply_id or not your_id:
             continue
 
-        # Check if you already replied back
+        # Check if you already replied back (recheck flag or response comment in DB)
+        if is_responded:
+            continue
         your_reply = conn.execute("""
             SELECT id FROM comments
             WHERE user_id = ? AND ancestor_path LIKE ? AND id > ?
@@ -474,6 +476,12 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       font-size: 0.8rem; color: #555; border: 1px solid #e5e5e5;
     }}
     .stat strong {{ color: #1a1a1a; font-size: 1rem; display: block; }}
+    .stat-link {{
+      text-decoration: none; color: #cc3300;
+      border-color: #ffd5cc; background: #fff8f7;
+    }}
+    .stat-link strong {{ color: #cc3300; font-size: 1rem; }}
+    .stat-link:hover {{ background: #fff0ee; border-color: #ff3300; }}
     .tab-nav {{
       max-width: 720px; margin: 0 auto 20px;
       border-bottom: 2px solid #e5e5e5; display: flex;
@@ -617,6 +625,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
+      <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a>
     </div>
   </div>
 
@@ -675,7 +684,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       {empty_msg}
     </div>
 
-    {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Show liked comments (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
+    {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Liked only — no reply (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
   </div>
 
   {pub_contents_html}
@@ -803,7 +812,26 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const section = document.getElementById('liked-section');
       const open = section.style.display === 'block';
       section.style.display = open ? 'none' : 'block';
-      btn.textContent = open ? '▶ Show liked comments' : '▼ Hide liked comments';
+      btn.textContent = open ? '▶ Liked only — no reply' : '▼ Liked only — no reply';
+    }}
+
+    (function initShowMore() {{
+      const SHOW = 10;
+      const cards = document.querySelectorAll('#action-cards .card');
+      if (cards.length <= SHOW) return;
+      for (let i = SHOW; i < cards.length; i++) {{
+        cards[i].classList.add('hidden-card');
+        cards[i].style.display = 'none';
+      }}
+      const btn = document.createElement('div');
+      btn.className = 'toggle-section';
+      btn.innerHTML = '<button class="toggle-btn" id="show-more-btn" onclick="showMoreCards(this)">▶ Show ' + (cards.length - SHOW) + ' more replies</button>';
+      document.getElementById('action-cards').after(btn);
+    }})();
+
+    function showMoreCards(btn) {{
+      document.querySelectorAll('#action-cards .hidden-card').forEach(c => c.style.display = '');
+      btn.closest('.toggle-section').remove();
     }}
 
     // Restore last sync log if present

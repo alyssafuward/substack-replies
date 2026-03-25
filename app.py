@@ -16,6 +16,7 @@ from flask import Flask, Response, request, redirect, jsonify
 
 from dashboard import load_data, load_stats, load_post_comments_data, render_html
 from scraper import init_db, load_next_post, refresh_post_comments
+from insights import load_all as load_insights, render_insights_html
 
 app = Flask(__name__)
 DB_PATH = Path(__file__).parent / "replies.db"
@@ -100,6 +101,17 @@ def sync_stop():
             _sync_proc.terminate()
         _sync_proc = None
     return ("", 204)
+
+
+@app.route("/insights")
+def insights():
+    if not DB_PATH.exists():
+        from flask import redirect
+        return redirect("/")
+    with sqlite3.connect(DB_PATH) as conn:
+        data = load_insights(conn)
+    html = render_insights_html(data)
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/")
