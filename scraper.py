@@ -203,11 +203,12 @@ def recheck_note_replies(conn):
         print(f"{ts()} Note recheck: nothing to check.")
         return 0
 
-    print(f"{ts()} Rechecking {len(rows)} note replies...")
+    total = len(rows)
+    print(f"{ts()} Rechecking {total} note replies...")
     newly_responded = 0
     still_unresponded = 0
 
-    for item_id, comment_id in rows:
+    for i, (item_id, comment_id) in enumerate(rows, 1):
         try:
             responded = False
 
@@ -236,13 +237,15 @@ def recheck_note_replies(conn):
             if responded:
                 conn.execute("UPDATE activity_items SET is_responded=1 WHERE id=?", (item_id,))
                 newly_responded += 1
+                print(f"{ts()}   [{i}/{total}] responded ✓")
             else:
                 still_unresponded += 1
+                print(f"{ts()}   [{i}/{total}] still unresponded")
 
             time.sleep(2.5)
 
         except Exception as e:
-            print(f"{ts()}   warning: couldn't recheck note {comment_id}: {e}")
+            print(f"{ts()}   [{i}/{total}] warning: couldn't recheck note {comment_id}: {e}")
             still_unresponded += 1
 
     conn.commit()
@@ -297,13 +300,15 @@ def recheck_unresponded(conn):
         key = (subdomain, post_id)
         groups.setdefault(key, []).append((item_id, comment_id))
 
-    print(f"{ts()} Rechecking {len(rows)} comment replies...")
+    num_groups = len(groups)
+    print(f"{ts()} Rechecking {len(rows)} comment replies across {num_groups} posts...")
     still_unresponded = skip_count
     newly_responded = 0
 
-    for (subdomain, post_id), items in groups.items():
+    for gi, ((subdomain, post_id), items) in enumerate(groups.items(), 1):
         try:
             comments = fetch_post_comments(subdomain, post_id)
+            print(f"{ts()}   [{gi}/{num_groups}] post {post_id} — {len(items)} comment(s)")
 
             for item_id, comment_id in items:
                 # Refresh stored comment with fresh data (includes current reaction)
@@ -320,12 +325,13 @@ def recheck_unresponded(conn):
                         "UPDATE activity_items SET is_responded=1 WHERE id=?", (item_id,)
                     )
                     newly_responded += 1
-                    print(f"{ts()}   responded: {item_id}")
+                    print(f"{ts()}     responded ✓")
                 else:
                     still_unresponded += 1
+                    print(f"{ts()}     still unresponded")
 
         except Exception as e:
-            print(f"{ts()}   warning: couldn't recheck post {post_id}: {e}")
+            print(f"{ts()}   [{gi}/{num_groups}] warning: couldn't recheck post {post_id}: {e}")
             still_unresponded += len(items)
 
         time.sleep(1)
