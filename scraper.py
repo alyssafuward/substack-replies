@@ -239,7 +239,7 @@ def recheck_note_replies(conn):
             else:
                 still_unresponded += 1
 
-            time.sleep(0.5)
+            time.sleep(1.5)
 
         except Exception as e:
             print(f"{ts()}   warning: couldn't recheck note {comment_id}: {e}")
@@ -964,6 +964,7 @@ def main():
 
             # Step 1: recheck items already in DB
             still_unresponded = recheck_unresponded(conn)
+            time.sleep(3)
             still_unresponded += recheck_note_replies(conn)
 
             # Step 2: always fetch a full target of new replies from new activity
