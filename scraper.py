@@ -239,7 +239,7 @@ def recheck_note_replies(conn):
             else:
                 still_unresponded += 1
 
-            time.sleep(1.5)
+            time.sleep(2.5)
 
         except Exception as e:
             print(f"{ts()}   warning: couldn't recheck note {comment_id}: {e}")
