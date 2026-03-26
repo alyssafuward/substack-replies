@@ -97,6 +97,7 @@ def load_data(conn):
             "date": (created_at or "")[:10],
             "raw_date": created_at or "",
             "who": name,
+            "handle": reply_handle,
             "label": label,
             "your_body": your_body,
             "their_body": reply_body,
@@ -153,12 +154,75 @@ def load_data(conn):
             "date": (date or "")[:10],
             "raw_date": date or "",
             "who": name or handle or "Anonymous",
+            "handle": handle or "",
             "label": "commented on your post",
             "your_body": post_title or "",
             "their_body": body or "",
             "link": link,
             "comment_id": cid,
             "liked": liked,
+            "thread": thread,
+        })
+
+    return results
+
+
+def load_responded_data(conn):
+    """Return activity reply items where you have responded."""
+    results = []
+    rows = conn.execute("""
+        SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
+        FROM activity_items a
+        WHERE a.type IN ('note_reply', 'comment_reply')
+          AND a.is_responded = 1
+        ORDER BY a.created_at DESC
+    """).fetchall()
+
+    for row in rows:
+        item_id, item_type, created_at, reply_id, your_id, raw = row
+        if not reply_id or not your_id:
+            continue
+
+        reply_row = conn.execute(
+            "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
+        ).fetchone()
+        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone()
+
+        if not reply_row:
+            continue
+
+        name = reply_row[0] or reply_row[1] or "Someone"
+        reply_handle = reply_row[1] or ""
+        reply_body = reply_row[2] or ""
+        post_id = reply_row[3]
+        post_url = reply_row[4]
+        reply_raw = json.loads(reply_row[5] or "{}")
+        your_body = your_row[0] if your_row else ""
+        label = "replied to your note" if item_type == "note_reply" else "replied to your comment"
+
+        if item_type == "note_reply" and reply_handle:
+            link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
+        elif post_url:
+            link = f"{post_url.rstrip('/')}/comment/{reply_id}"
+        elif post_id:
+            link = f"https://substack.com/p/{post_id}/comment/{reply_id}"
+        else:
+            link = ""
+
+        thread = load_thread(conn, reply_id)
+
+        results.append({
+            "source": "activity",
+            "date": (created_at or "")[:10],
+            "raw_date": created_at or "",
+            "who": name,
+            "handle": reply_handle,
+            "label": label,
+            "your_body": your_body,
+            "their_body": reply_body,
+            "link": link,
+            "comment_id": reply_id,
+            "liked": bool(reply_raw.get("reaction")),
             "thread": thread,
         })
 
@@ -184,11 +248,37 @@ def load_stats(conn):
     synced_up_to = conn.execute(
         "SELECT value FROM sync_state WHERE key='last_synced_at'"
     ).fetchone()
+
+    # Gap detection: find the largest silent stretch between consecutive activity items.
+    # If any gap > 14 days exists in a DB with 100+ items, warn the user.
+    gap_warning = None
+    if activity_count >= 100:
+        rows = conn.execute(
+            "SELECT updated_at FROM activity_items WHERE updated_at IS NOT NULL ORDER BY updated_at"
+        ).fetchall()
+        max_gap_days = 0
+        gap_start = gap_end = None
+        for i in range(1, len(rows)):
+            try:
+                from datetime import datetime, timezone
+                a = datetime.fromisoformat(rows[i-1][0].replace("Z", "+00:00"))
+                b = datetime.fromisoformat(rows[i][0].replace("Z", "+00:00"))
+                days = (b - a).total_seconds() / 86400
+                if days > max_gap_days:
+                    max_gap_days = days
+                    gap_start = rows[i-1][0][:10]
+                    gap_end = rows[i][0][:10]
+            except Exception:
+                pass
+        if max_gap_days > 14:
+            gap_warning = f"Data gap detected: {int(max_gap_days)} days missing between {gap_start} and {gap_end}. History may be incomplete — consider a full resync."
+
     return {
         "activity_items": activity_count,
         "comments": comment_count,
         "posts": post_count,
         "synced_up_to": _format_sync_time(synced_up_to[0]) if synced_up_to else "never",
+        "gap_warning": gap_warning,
     }
 
 def load_post_comments_data(conn, pub_subdomain):
@@ -328,8 +418,9 @@ def render_card(item, section="action"):
     link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open on Substack →</a>' if link else ""
     thread_html = render_thread(thread)
 
+    who_key = escape((item["who"] + " " + item.get("handle", "")).strip().lower())
     return f"""
-    <div class="card" data-id="{cid}" data-section="{section}">
+    <div class="card" data-id="{cid}" data-section="{section}" data-who="{who_key}">
       <div class="card-header">
         <div class="card-meta">
           <span class="badge">{source_badge}</span>
@@ -432,18 +523,21 @@ def render_post_comments_tab(posts_data, pub_subdomain):
   {empty_html}"""
 
 
-def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None):
+def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None):
     all_posts_data = all_posts_data or {}
     all_pubs = all_pubs or []
+    responded_items = responded_items or []
 
     needs_response = [i for i in items if not i.get("liked")]
     reviewed = [i for i in items if i.get("liked")]
 
     action_cards = "\n".join(render_card(i, "action") for i in needs_response)
     reviewed_cards = "\n".join(render_card(i, "liked") for i in reviewed)
+    responded_cards = "\n".join(render_card(i, "responded") for i in responded_items)
 
     count = len(needs_response)
     reviewed_count = len(reviewed)
+    responded_count = len(responded_items)
     empty_msg = "" if count else '<div class="empty">🎉 All caught up!</div>'
 
     pub_tabs_html = "\n".join(
@@ -482,6 +576,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
     .stat-link strong {{ color: #cc3300; font-size: 1rem; }}
     .stat-link:hover {{ background: #fff0ee; border-color: #ff3300; }}
+    .gap-warning {{
+      max-width: 720px; margin: 10px auto 0;
+      background: #fffbe6; border: 1px solid #f0c040; border-radius: 6px;
+      padding: 8px 14px; font-size: 0.82rem; color: #7a5c00;
+    }}
     .tab-nav {{
       max-width: 720px; margin: 0 auto 20px;
       border-bottom: 2px solid #e5e5e5; display: flex;
@@ -627,6 +726,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
       <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a>
     </div>
+    {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
   </div>
 
   <div class="intro">
@@ -655,6 +755,10 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 
   <div id="tab-replies">
     <div style="max-width:720px; margin:0 auto;">
+      <div style="margin-bottom:14px;">
+        <input type="text" id="commenter-search" placeholder="Filter by name or @handle…" oninput="filterByName(this.value)"
+               style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+      </div>
       <div class="sync-row">
         <label style="font-size:0.82rem; color:#666;">New replies to sync:</label>
         <select id="sync-count" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
@@ -684,7 +788,8 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       {empty_msg}
     </div>
 
-    {"<div class='toggle-section'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Liked only — no reply (" + str(reviewed_count) + ")</button><div class='liked-section' id='liked-section'><div class='cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
+    {"<div class='toggle-section' id='liked-toggle-wrap'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Liked only — no reply (<span id='liked-count'>" + str(reviewed_count) + "</span>)</button><div class='liked-section' id='liked-section'><div class='cards' id='liked-cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
+    {"<div class='toggle-section' id='responded-toggle-wrap'><button class='toggle-btn' onclick='toggleResponded(this)'>▶ Responded (<span id='responded-count'>" + str(responded_count) + "</span>)</button><div class='liked-section' id='responded-section'><div class='cards' id='responded-cards'>" + responded_cards + "</div></div></div>" if responded_count else ""}
   </div>
 
   {pub_contents_html}
@@ -762,8 +867,21 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }};
       _loadEs.onerror = function() {{
         _loadEs.close(); _loadEs = null;
-        btn.style.display = ''; stopBtn.style.display = 'none';
-        status.textContent = 'Error — check terminal';
+        fetch('/sync/status').then(r => r.json()).then(data => {{
+          if (data.running) {{
+            btn.style.display = 'none'; stopBtn.style.display = '';
+            status.textContent = 'Connection lost — sync still running in background…';
+            var poll = setInterval(() => {{
+              fetch('/sync/status').then(r => r.json()).then(d => {{
+                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; setTimeout(() => window.location.reload(), 1500); }}
+              }});
+            }}, 5000);
+          }} else {{
+            btn.style.display = ''; stopBtn.style.display = 'none';
+            status.textContent = 'Connection lost — reloading…';
+            setTimeout(() => window.location.reload(), 2000);
+          }}
+        }}).catch(() => {{ btn.style.display = ''; stopBtn.style.display = 'none'; status.textContent = 'Connection lost.'; }});
       }};
     }}
 
@@ -812,7 +930,69 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const section = document.getElementById('liked-section');
       const open = section.style.display === 'block';
       section.style.display = open ? 'none' : 'block';
-      btn.textContent = open ? '▶ Liked only — no reply' : '▼ Liked only — no reply';
+      const count = document.getElementById('liked-count');
+      const label = count ? ' (' + count.textContent + ')' : '';
+      btn.innerHTML = (open ? '▶ Liked only — no reply' : '▼ Liked only — no reply') + ' (<span id="liked-count">' + (count ? count.textContent : '') + '</span>)';
+    }}
+
+    function toggleResponded(btn) {{
+      const section = document.getElementById('responded-section');
+      const open = section.style.display === 'block';
+      section.style.display = open ? 'none' : 'block';
+      const count = document.getElementById('responded-count');
+      btn.innerHTML = (open ? '▶ Responded' : '▼ Responded') + ' (<span id="responded-count">' + (count ? count.textContent : '') + '</span>)';
+    }}
+
+    function filterByName(q) {{
+      q = q.toLowerCase().trim();
+
+      // Helper: filter cards in a container, return visible count
+      function filterCards(containerId, q) {{
+        const cards = document.querySelectorAll('#' + containerId + ' .card');
+        let visible = 0;
+        cards.forEach(card => {{
+          const who = (card.dataset.who || '').toLowerCase();
+          const show = !q || who.includes(q);
+          card.style.display = show ? '' : 'none';
+          if (show) visible++;
+        }});
+        return visible;
+      }}
+
+      // Unanswered — also clear show-more hiding when filtering
+      const actionCards = document.querySelectorAll('#action-cards .card');
+      let visibleAction = 0;
+      actionCards.forEach(card => {{
+        const who = (card.dataset.who || '').toLowerCase();
+        const show = !q || who.includes(q);
+        card.style.display = show ? '' : 'none';
+        if (show) visibleAction++;
+      }});
+      // Remove show-more button when filtering
+      const showMoreWrap = document.getElementById('show-more-btn');
+      if (showMoreWrap) showMoreWrap.closest('.toggle-section').style.display = q ? 'none' : '';
+      const remaining = document.getElementById('remaining');
+      if (remaining) remaining.textContent = visibleAction;
+
+      // Liked
+      const visibleLiked = filterCards('liked-cards', q);
+      const likedCount = document.getElementById('liked-count');
+      if (likedCount) likedCount.textContent = visibleLiked;
+      const likedWrap = document.getElementById('liked-toggle-wrap');
+      if (likedWrap) {{
+        likedWrap.style.display = (!q || visibleLiked > 0) ? '' : 'none';
+        if (q && visibleLiked > 0) document.getElementById('liked-section').style.display = 'block';
+      }}
+
+      // Responded
+      const visibleResponded = filterCards('responded-cards', q);
+      const respondedCount = document.getElementById('responded-count');
+      if (respondedCount) respondedCount.textContent = visibleResponded;
+      const respondedWrap = document.getElementById('responded-toggle-wrap');
+      if (respondedWrap) {{
+        respondedWrap.style.display = (!q || visibleResponded > 0) ? '' : 'none';
+        if (q && visibleResponded > 0) document.getElementById('responded-section').style.display = 'block';
+      }}
     }}
 
     (function initShowMore() {{
@@ -903,9 +1083,34 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }};
       _es.onerror = function() {{
         _es.close(); _es = null;
-        btn.style.display = ''; stopBtn.style.display = 'none';
-        status.textContent = 'Error — check terminal';
+        fetch('/sync/status').then(r => r.json()).then(data => {{
+          if (data.running) {{
+            btn.style.display = 'none'; stopBtn.style.display = '';
+            status.textContent = 'Connection lost (computer may have slept) — sync is still running in background…';
+            _pollUntilDone();
+          }} else {{
+            btn.style.display = ''; stopBtn.style.display = 'none';
+            status.textContent = 'Connection lost — sync may have completed. Reloading…';
+            setTimeout(() => window.location.reload(), 2000);
+          }}
+        }}).catch(() => {{
+          btn.style.display = ''; stopBtn.style.display = 'none';
+          status.textContent = 'Connection lost — reload to check status.';
+        }});
       }};
+      function _pollUntilDone() {{
+        setTimeout(() => {{
+          fetch('/sync/status').then(r => r.json()).then(data => {{
+            if (data.running) {{
+              status.textContent = 'Sync still running in background… (reload to see progress)';
+              _pollUntilDone();
+            }} else {{
+              status.textContent = 'Sync complete — reloading…';
+              setTimeout(() => window.location.reload(), 1500);
+            }}
+          }}).catch(() => _pollUntilDone());
+        }}, 5000);
+      }}
     }}
 
     function stopSync() {{
@@ -955,8 +1160,21 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }};
       _postsEs.onerror = function() {{
         _postsEs.close(); _postsEs = null;
-        btn.style.display = ''; stopBtn.style.display = 'none';
-        status.textContent = 'Error — check terminal';
+        fetch('/sync/status').then(r => r.json()).then(data => {{
+          if (data.running) {{
+            btn.style.display = 'none'; stopBtn.style.display = '';
+            status.textContent = 'Connection lost — sync still running in background…';
+            var poll = setInterval(() => {{
+              fetch('/sync/status').then(r => r.json()).then(d => {{
+                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; setTimeout(() => window.location.reload(), 1500); }}
+              }});
+            }}, 5000);
+          }} else {{
+            btn.style.display = ''; stopBtn.style.display = 'none';
+            status.textContent = 'Connection lost — reloading…';
+            setTimeout(() => window.location.reload(), 2000);
+          }}
+        }}).catch(() => {{ btn.style.display = ''; stopBtn.style.display = 'none'; status.textContent = 'Connection lost.'; }});
       }};
     }}
 

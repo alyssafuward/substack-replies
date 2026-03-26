@@ -60,10 +60,7 @@ def get(url, params=None, retries=4):
             time.sleep(5)
             continue
         if resp.status_code == 429:
-            wait = 60 * (attempt + 1)
-            print(f"  Rate limited, waiting {wait}s...")
-            time.sleep(wait)
-            continue
+            raise Exception("RATE_LIMITED")
         if resp.status_code >= 500:
             if attempt == retries - 1:
                 resp.raise_for_status()
@@ -342,7 +339,7 @@ def recheck_unresponded(conn):
 
 # ── Sync: Activity Feed ───────────────────────────────────────────────────────
 
-def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_last_synced=None):
+def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_last_synced=None, stop_on_empty=False):
     """
     Fetch activity feed newest-first, storing items until `target` new
     unresponded items are found or the feed is exhausted / last sync point reached.
@@ -364,6 +361,7 @@ def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_l
     newest_ts = None
     oldest_ts = None
     done = False
+    consecutive_empty = 0
 
     print(f"{ts()} Fetching activity feed (need {target} more replies)...")
 
@@ -447,6 +445,40 @@ def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_l
                     WHERE user_id=? AND ancestor_path LIKE ? AND id > ?
                 """, (USER_ID, f"%{comment_id}%", comment_id)).fetchone()
 
+                # For liked replies: recheck skips them, so check for your reply now
+                if not your_reply and item_type in ("note_reply", "comment_reply"):
+                    stored = conn.execute("SELECT raw_json FROM comments WHERE id=?", (comment_id,)).fetchone()
+                    if stored:
+                        try:
+                            raw = json.loads(stored[0] or "{}")
+                            if raw.get("reaction"):
+                                if item_type == "note_reply":
+                                    replies_data = get(
+                                        f"https://substack.com/api/v1/reader/comment/{comment_id}/replies?comment_id={comment_id}"
+                                    )
+                                    for branch in replies_data.get("commentBranches", []):
+                                        c = branch.get("comment", {})
+                                        if c.get("user_id") == USER_ID:
+                                            _store_comment(conn, c, pub_subdomain=None,
+                                                           post_id=c.get("post_id"),
+                                                           post_title=None, post_url=None)
+                                            your_reply = True
+                                            break
+                                else:  # comment_reply
+                                    post_url = conn.execute(
+                                        "SELECT post_url FROM comments WHERE id=?", (comment_id,)
+                                    ).fetchone()
+                                    post_id_val = item.get("target_post_id")
+                                    if post_url and post_url[0] and post_id_val:
+                                        parsed = urlparse(post_url[0])
+                                        subdomain = parsed.netloc.replace(".substack.com", "")
+                                        thread = fetch_post_comments(subdomain, post_id_val)
+                                        if _user_replied_in_thread(thread, comment_id, USER_ID):
+                                            your_reply = True
+                                time.sleep(1)
+                        except Exception:
+                            pass
+
                 if your_reply:
                     conn.execute(
                         "UPDATE activity_items SET is_responded=1 WHERE id=?", (item["id"],)
@@ -463,7 +495,16 @@ def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_l
 
         print(f"{ts()}   Page {pages} — {new_this_page} stored | {new_unresponded}/{target} replies")
 
-        if not done and not data.get("more"):
+        if stop_on_empty:
+            if new_this_page == 0:
+                consecutive_empty += 1
+                if consecutive_empty >= 3:
+                    print(f"{ts()}   3 consecutive empty pages — fully synced to this point.")
+                    break
+            else:
+                consecutive_empty = 0
+
+        if not data.get("more"):
             print(f"{ts()}   No more pages.")
             done = True
             break
@@ -480,15 +521,22 @@ def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_l
             min_ts = min(updated_ats)
             dt = datetime.fromisoformat(min_ts.replace("Z", "+00:00"))
             after = (dt - timedelta(milliseconds=1)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            # Persist cursor after each page so interrupted syncs can resume correctly.
+            # Only move backfill_cursor BACKWARD (to older dates) — never forward.
+            # This ensures forward syncs don't overwrite the oldest-ever-fetched cursor.
+            current_backfill = get_state(conn, "backfill_cursor")
+            if not current_backfill or after < current_backfill:
+                set_state(conn, "backfill_cursor", after)
+            # For forward syncs, also update last_synced_at now (not just at the end)
+            # so a killed sync doesn't re-scan from the top next time.
+            if after_cursor is None and newest_ts:
+                set_state(conn, "last_synced_at", newest_ts)
+            conn.commit()
 
     # Update watermarks
     should_update_last_synced = set_last_synced if set_last_synced is not None else (after_cursor is None)
     if newest_ts and should_update_last_synced:
         set_state(conn, "last_synced_at", newest_ts)
-    if oldest_ts:
-        current_oldest = get_state(conn, "oldest_fetched_at")
-        if not current_oldest or oldest_ts < current_oldest:
-            set_state(conn, "oldest_fetched_at", oldest_ts)
     conn.commit()
 
     print(f"{ts()} Activity feed done: {new_items} new items, {new_unresponded} replies counted ({pages} pages)")
@@ -968,33 +1016,40 @@ def main():
             else:
                 print(f"{ts()} Starting sync...")
 
-            # Step 1: recheck items already in DB
-            still_unresponded = recheck_unresponded(conn)
-            time.sleep(3)
-            still_unresponded += recheck_note_replies(conn)
+            try:
+                # Step 1: recheck items already in DB
+                still_unresponded = recheck_unresponded(conn)
+                time.sleep(3)
+                still_unresponded += recheck_note_replies(conn)
 
-            # Step 2: always fetch a full target of new replies from new activity
-            new_items, new_unresponded = 0, 0
-            oldest_ts = None
-            new_items, new_unresponded, oldest_ts = sync_activity_feed(
-                conn, target=count,
-                after_cursor=as_of_cursor,   # None for normal sync; date cursor for --as-of
-                set_last_synced=True,
-            )
+                # Step 2: always fetch a full target of new replies from new activity
+                new_items, new_unresponded = 0, 0
+                oldest_ts = None
+                new_items, new_unresponded, oldest_ts = sync_activity_feed(
+                    conn, target=count,
+                    after_cursor=as_of_cursor,   # None for normal sync; date cursor for --as-of
+                    set_last_synced=True,
+                )
 
-            # Step 3: backfill if new period ran out before hitting target
-            if new_unresponded < count:
-                remaining = count - new_unresponded
-                oldest_cursor = get_state(conn, "oldest_fetched_at")
-                if oldest_cursor:
-                    print(f"{ts()} Backfilling — need {remaining} more replies...")
-                    sync_activity_feed(conn, target=remaining, after_cursor=oldest_cursor,
-                                       set_last_synced=False)
+                # Step 3: backfill older history if we haven't fetched everything
+                if new_unresponded < count:
+                    remaining = count - new_unresponded
+                    oldest_cursor = get_state(conn, "backfill_cursor")
+                    if oldest_cursor:
+                        print(f"{ts()} Backfilling — need {remaining} more replies...")
+                        sync_activity_feed(conn, target=remaining, after_cursor=oldest_cursor,
+                                           set_last_synced=False, stop_on_empty=True)
 
-            conn.execute("INSERT INTO sync_log VALUES (?,?,?)",
-                         (datetime.now(timezone.utc).isoformat(), "activity_feed", new_items))
-            conn.commit()
-            print(f"{ts()} Sync complete.\n")
+                conn.execute("INSERT INTO sync_log VALUES (?,?,?)",
+                             (datetime.now(timezone.utc).isoformat(), "activity_feed", new_items))
+                conn.commit()
+                print(f"{ts()} Sync complete.\n")
+
+            except Exception as e:
+                if "RATE_LIMITED" in str(e):
+                    print(f"{ts()} Rate limited — please wait a few minutes and try again.")
+                else:
+                    raise
 
         if "report" in args:
             report(conn)
