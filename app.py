@@ -7,38 +7,47 @@ Usage:
   Then open http://localhost:5000 in your browser.
 """
 
+import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
+import time
 import threading
 from pathlib import Path
 from flask import Flask, Response, request, redirect, jsonify
 
-from dashboard import load_data, load_stats, load_post_comments_data, render_html
+from dashboard import load_data, load_stats, load_post_comments_data, load_responded_data, render_html
 from scraper import init_db, load_next_post, refresh_post_comments
-from insights import load_all as load_insights, render_insights_html
+from insights import load_all as load_insights, render_insights_html, search_commenter
 
 app = Flask(__name__)
 DB_PATH = Path(__file__).parent / "replies.db"
 
 _sync_proc = None
 _sync_lock = threading.Lock()
+_sync_log_path = None  # temp file subprocess writes to
 
 
 def _try_start_sync(cmd):
-    """Start a subprocess if none is running. Returns (proc, error_str)."""
-    global _sync_proc
+    """Start a subprocess writing to a temp file. Returns (started, error_str).
+    If a sync is already running, returns (False, None) so caller can tail the existing log.
+    """
+    global _sync_proc, _sync_log_path
     with _sync_lock:
         if _sync_proc is not None and _sync_proc.poll() is None:
-            return None, "A sync is already in progress. Please wait for it to finish."
+            return False, None  # already running — caller should tail existing log
+        fd, _sync_log_path = tempfile.mkstemp(suffix=".log", prefix="substack_sync_")
+        log_file = os.fdopen(fd, "w")
         _sync_proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=log_file,
             stderr=subprocess.STDOUT,
             cwd=Path(__file__).parent,
             text=True,
         )
-        return _sync_proc, None
+        log_file.close()  # parent closes its handle; subprocess keeps its own fd
+        return True, None
 
 
 def _finish_sync():
@@ -47,18 +56,72 @@ def _finish_sync():
         _sync_proc = None
 
 
+def _tail_log(log_path):
+    """SSE generator: tail a log file until the subprocess exits, then emit __done__."""
+    position = 0
+    while True:
+        # Read any new output
+        try:
+            with open(log_path, "r") as f:
+                f.seek(position)
+                chunk = f.read()
+                position = f.tell()
+        except Exception:
+            break
+
+        if chunk:
+            for line in chunk.splitlines():
+                if line.strip():
+                    yield f"data: {line}\n\n"
+
+        # Check if process has exited
+        with _sync_lock:
+            proc = _sync_proc
+
+        if proc is not None and proc.poll() is not None:
+            # Drain any remaining output
+            try:
+                with open(log_path, "r") as f:
+                    f.seek(position)
+                    for line in f:
+                        if line.strip():
+                            yield f"data: {line.rstrip()}\n\n"
+            except Exception:
+                pass
+            _finish_sync()
+            yield "data: __done__\n\n"
+            return
+        elif proc is None:
+            # Already cleaned up by another thread
+            yield "data: __done__\n\n"
+            return
+
+        # No new content yet — keepalive and wait
+        if not chunk:
+            yield ": keepalive\n\n"
+            time.sleep(0.5)
+
+
 def _stream(cmd):
-    """SSE generator: starts a subprocess or yields an error if one is already running."""
-    proc, err = _try_start_sync(cmd)
+    """SSE generator: start subprocess (or attach to running one) and tail its log."""
+    started, err = _try_start_sync(cmd)
     if err:
         yield f"data: ERROR: {err}\n\n"
         yield "data: __error__\n\n"
         return
-    for line in proc.stdout:
-        yield f"data: {line.rstrip()}\n\n"
-    proc.wait()
-    _finish_sync()
-    yield "data: __done__\n\n"
+
+    with _sync_lock:
+        log_path = _sync_log_path
+
+    if not log_path:
+        yield "data: ERROR: Could not find sync log.\n\n"
+        yield "data: __error__\n\n"
+        return
+
+    if not started:
+        yield "data: (Attaching to running sync…)\n\n"
+
+    yield from _tail_log(log_path)
 
 
 _SSE_HEADERS = {"X-Accel-Buffering": "no", "Cache-Control": "no-cache"}
@@ -108,9 +171,11 @@ def insights():
     if not DB_PATH.exists():
         from flask import redirect
         return redirect("/")
+    query = request.args.get("q", "").strip()
     with sqlite3.connect(DB_PATH) as conn:
         data = load_insights(conn)
-    html = render_insights_html(data)
+        search_results = search_commenter(conn, query) if query else None
+    html = render_insights_html(data, query=query or None, search_results=search_results)
     return Response(html, mimetype="text/html")
 
 
@@ -127,9 +192,11 @@ def index():
         items = load_data(conn)
         stats = load_stats(conn)
         all_posts_data = {pub: load_post_comments_data(conn, pub) for pub in all_pubs}
+        responded_items = load_responded_data(conn)
 
     html = render_html(items, stats, all_posts_data=all_posts_data,
-                       active_tab=active_tab, all_pubs=all_pubs)
+                       active_tab=active_tab, all_pubs=all_pubs,
+                       responded_items=responded_items)
     return Response(html, mimetype="text/html")
 
 
@@ -217,8 +284,42 @@ def render_empty():
       };
       _es.onerror = function() {
         _es.close(); _es = null;
-        btn.style.display = ''; stopBtn.style.display = 'none';
-        status.textContent = 'Error — check terminal';
+        fetch('/sync/status').then(r => r.json()).then(data => {
+          if (data.running) {
+            btn.style.display = 'none'; stopBtn.style.display = '';
+            status.textContent = 'Connection lost — sync still running. Reconnecting…';
+            setTimeout(function reconnect() {
+              _es = new EventSource('/sync?count=0');
+              _es.onmessage = function(e) {
+                if (e.data === '__done__') {
+                  _es.close(); _es = null;
+                  localStorage.setItem('lastSyncLog', log.textContent);
+                  status.textContent = 'Done — reloading…';
+                  setTimeout(() => window.location.reload(), 1500);
+                  return;
+                }
+                if (!e.data.startsWith('(')) { log.textContent += e.data + '\\n'; log.scrollTop = log.scrollHeight; }
+                status.textContent = e.data;
+              };
+              _es.onerror = function() {
+                _es.close(); _es = null;
+                status.textContent = 'Connection lost — sync still running in background. Will reload when done.';
+                var poll = setInterval(() => {
+                  fetch('/sync/status').then(r => r.json()).then(d => {
+                    if (!d.running) { clearInterval(poll); status.textContent = 'Done — reloading…'; setTimeout(() => window.location.reload(), 1500); }
+                  });
+                }, 5000);
+              };
+            }, 2000);
+          } else {
+            btn.style.display = ''; stopBtn.style.display = 'none';
+            status.textContent = 'Sync completed. Reloading…';
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        }).catch(() => {
+          btn.style.display = ''; stopBtn.style.display = 'none';
+          status.textContent = 'Connection lost — reload to check status.';
+        });
       };
     }
     function stopSync() {

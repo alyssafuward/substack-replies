@@ -167,6 +167,98 @@ def load_engagement_breakdown(conn):
     return result
 
 
+def _extract_text(node):
+    """Extract plain text from a Substack Prosemirror-style body node."""
+    if not node:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, dict):
+        if node.get("type") == "text":
+            return node.get("text", "")
+        parts = [_extract_text(child) for child in node.get("content", [])]
+        return " ".join(p for p in parts if p)
+    if isinstance(node, list):
+        return " ".join(_extract_text(n) for n in node if n)
+    return ""
+
+
+def search_commenter(conn, query):
+    """Find commenters matching query (name or handle) and return their comment history."""
+    like = f"%{query}%"
+    users = conn.execute("""
+        SELECT user_id, name, handle, COUNT(*) as n
+        FROM comments
+        WHERE user_id != ? AND user_id IS NOT NULL
+          AND (name LIKE ? OR handle LIKE ?)
+        GROUP BY user_id
+        ORDER BY n DESC
+        LIMIT 5
+    """, (USER_ID, like, like)).fetchall()
+
+    results = []
+    for user_id, name, handle, total in users:
+        rows = conn.execute("""
+            SELECT c.id, c.date, c.body, c.raw_json,
+                   p.title, p.canonical_url,
+                   a.is_responded, a.type
+            FROM comments c
+            LEFT JOIN posts p ON p.id = c.post_id
+            LEFT JOIN activity_items a ON a.comment_id = c.id
+                AND a.type IN ('note_reply', 'comment_reply')
+            WHERE c.user_id = ?
+            ORDER BY c.date DESC
+        """, (user_id,)).fetchall()
+
+        comments = []
+        for cid, created_at, body_col, raw_json, post_title, post_url, is_responded, activity_type in rows:
+            try:
+                data = json.loads(raw_json or "{}")
+                text = _extract_text(data.get("body", {})) or (body_col or "")
+            except Exception:
+                data, text = {}, (body_col or "")
+
+            if activity_type:
+                if is_responded:
+                    status = "responded"
+                else:
+                    has_reply = bool(conn.execute(
+                        "SELECT id FROM comments WHERE user_id=? AND ancestor_path LIKE ? AND id > ?",
+                        (USER_ID, f"%{cid}%", cid)
+                    ).fetchone())
+                    if has_reply:
+                        status = "responded"
+                    elif data.get("reaction"):
+                        status = "liked_only"
+                    else:
+                        status = "unanswered"
+            else:
+                status = "no_activity"
+
+            try:
+                date_str = datetime.strptime((created_at or "")[:10], "%Y-%m-%d").strftime("%b %d, %Y") if created_at else ""
+            except Exception:
+                date_str = (created_at or "")[:10]
+
+            comments.append({
+                "id": cid,
+                "date": date_str,
+                "text": text,
+                "post_title": post_title or "(untitled)",
+                "post_url": post_url or "",
+                "status": status,
+            })
+
+        results.append({
+            "name": name or handle or "Anonymous",
+            "handle": handle or "",
+            "total": total,
+            "comments": comments,
+        })
+
+    return results
+
+
 def load_all(conn):
     return {
         "response_rate": load_response_rate(conn),
@@ -330,12 +422,78 @@ def render_engagement_breakdown(engagement):
     </div>"""
 
 
-def render_insights_html(data):
+def render_commenter_search(query, results):
+    q_escaped = _escape(query or "")
+    form = f"""
+    <div class="card">
+      <div class="card-title">Commenter Search</div>
+      <form method="get" action="/insights" style="display:flex; gap:8px; align-items:center;">
+        <input type="text" name="q" value="{q_escaped}"
+               placeholder="Search by name or @handle…"
+               style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem;">
+        <button type="submit" style="background:#ff3300; color:white; border:none; border-radius:6px; padding:8px 16px; font-size:0.85rem; font-weight:600; cursor:pointer;">Search</button>
+      </form>
+    </div>"""
+
+    if not query:
+        return form
+
+    if not results:
+        return form + f"""
+    <div class="card" style="color:#999; font-size:0.9rem;">No results for <strong>{q_escaped}</strong>.</div>"""
+
+    result_cards = ""
+    for person in results:
+        name = _escape(person["name"])
+        handle = _escape(person["handle"])
+        handle_str = f' <span style="color:#bbb; font-size:0.78rem;">@{handle}</span>' if handle else ""
+        total = person["total"]
+        suffix = "s" if total != 1 else ""
+
+        items_html = ""
+        for c in person["comments"]:
+            status = c["status"]
+            if status == "responded":
+                badge = '<span class="badge badge-responded">Responded</span>'
+            elif status == "liked_only":
+                badge = '<span class="badge badge-liked">Liked</span>'
+            elif status == "unanswered":
+                badge = '<span class="badge badge-unanswered">Unanswered</span>'
+            else:
+                badge = ""
+
+            raw_text = c["text"]
+            text = _escape(raw_text[:400] + ("…" if len(raw_text) > 400 else ""))
+            post_title = _escape(c["post_title"])
+            post_url = _escape(c["post_url"])
+            post_link = f'<a href="{post_url}" target="_blank" class="post-link">{post_title}</a>' if post_url else post_title
+
+            items_html += f"""
+            <div class="history-item">
+              <div class="history-meta">
+                <span class="history-date">{_escape(c["date"])}</span>
+                <span class="history-on">on {post_link}</span>
+                {badge}
+              </div>
+              <div class="history-text">{text or "<em style='color:#ccc'>No text</em>"}</div>
+            </div>"""
+
+        result_cards += f"""
+    <div class="card">
+      <div class="card-title">{name}{handle_str} <span style="font-weight:400; color:#ccc;">— {total} comment{suffix}</span></div>
+      <div class="history">{items_html}</div>
+    </div>"""
+
+    return form + result_cards
+
+
+def render_insights_html(data, query=None, search_results=None):
     response_rate_html = render_response_rate(data["response_rate"])
     monthly_html = render_monthly_chart(data["monthly"])
     commenters_html = render_top_commenters(data["top_commenters"])
     posts_html = render_top_posts(data["top_posts"])
     engagement_html = render_engagement_breakdown(data["engagement"])
+    search_html = render_commenter_search(query, search_results)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -404,6 +562,19 @@ def render_insights_html(data):
     .post-link {{ color: #cc3300; text-decoration: none; font-size: 0.85rem; }}
     .post-link:hover {{ text-decoration: underline; }}
 
+    /* Commenter history */
+    .history {{ display: flex; flex-direction: column; gap: 14px; }}
+    .history-item {{ padding-bottom: 14px; border-bottom: 1px solid #f3f3f3; }}
+    .history-item:last-child {{ border-bottom: none; padding-bottom: 0; }}
+    .history-meta {{ display: flex; align-items: center; gap: 8px; margin-bottom: 5px; flex-wrap: wrap; }}
+    .history-date {{ font-size: 0.75rem; color: #bbb; }}
+    .history-on {{ font-size: 0.75rem; color: #ccc; }}
+    .history-text {{ font-size: 0.88rem; color: #444; line-height: 1.5; }}
+    .badge {{ font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 10px; }}
+    .badge-responded {{ background: #dcfce7; color: #16a34a; }}
+    .badge-liked {{ background: #fef3c7; color: #d97706; }}
+    .badge-unanswered {{ background: #fee2e2; color: #dc2626; }}
+
     a {{ color: #bbb; }}
   </style>
 </head>
@@ -415,6 +586,7 @@ def render_insights_html(data):
   </div>
 
   <div class="grid">
+    {search_html}
     {response_rate_html}
     {monthly_html}
     {commenters_html}
