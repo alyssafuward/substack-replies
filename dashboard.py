@@ -28,10 +28,17 @@ def load_thread(conn, reply_id):
         return []
     placeholders = ",".join("?" * len(ancestor_ids))
     rows = conn.execute(
-        f"SELECT id, name, body FROM comments WHERE id IN ({placeholders})", ancestor_ids
+        f"SELECT id, name, body, post_url FROM comments WHERE id IN ({placeholders})", ancestor_ids
     ).fetchall()
     by_id = {r[0]: r for r in rows}
-    return [{"name": by_id[i][1] or "?", "body": by_id[i][2] or ""} for i in ancestor_ids if i in by_id]
+    result = []
+    for i in ancestor_ids:
+        if i not in by_id:
+            continue
+        _, name, body, post_url = by_id[i]
+        link = f"{post_url.rstrip('/')}/comment/{i}" if post_url else None
+        result.append({"id": i, "name": name or "?", "body": body or "", "link": link})
+    return result
 
 
 def load_data(conn):
@@ -362,18 +369,20 @@ def format_date(raw):
         return raw[:10]
 
 def render_thread_msg(m):
-    name = escape(m['name'])
+    link = m.get('link')
+    name_text = escape(m['name'])
+    name_html = f'<a class="thread-name-link" href="{link}" target="_blank">{name_text}</a>' if link else f'<span class="thread-name">{name_text}</span>'
     body = m['body']
     LIMIT = 120
     if len(body) <= LIMIT:
         return f"""<div class="thread-msg">
-      <span class="thread-name">{name}</span>
+      {name_html}
       <span class="thread-body">{escape(body)}</span>
     </div>"""
     short = escape(body[:LIMIT])
     full = escape(body)
     return f"""<div class="thread-msg">
-      <span class="thread-name">{name}</span>
+      {name_html}
       <span class="thread-body"><span class="thread-short">{short}<button class="thread-more" onclick="expandThread(this)">… more</button></span><span class="thread-full" style="display:none">{full}<button class="thread-more" onclick="collapseThread(this)"> less</button></span></span>
     </div>"""
 
@@ -663,6 +672,8 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       border-left: 3px solid #e0e0e0; margin-bottom: 4px;
     }}
     .thread-name {{ font-weight: 600; color: #888; margin-right: 6px; }}
+    .thread-name-link {{ font-weight: 600; color: #888; margin-right: 6px; text-decoration: none; }}
+    .thread-name-link:hover {{ color: #cc3300; text-decoration: underline; }}
     .thread-body {{ color: #aaa; }}
     .thread-more {{ background: none; border: none; cursor: pointer; color: #bbb; font-size: 0.78rem; padding: 0; }}
     .thread-more:hover {{ color: #888; }}
