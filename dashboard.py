@@ -28,15 +28,20 @@ def load_thread(conn, reply_id):
         return []
     placeholders = ",".join("?" * len(ancestor_ids))
     rows = conn.execute(
-        f"SELECT id, name, body, post_url FROM comments WHERE id IN ({placeholders})", ancestor_ids
+        f"SELECT id, name, body, post_url, handle FROM comments WHERE id IN ({placeholders})", ancestor_ids
     ).fetchall()
     by_id = {r[0]: r for r in rows}
     result = []
     for i in ancestor_ids:
         if i not in by_id:
             continue
-        _, name, body, post_url = by_id[i]
-        link = f"{post_url.rstrip('/')}/comment/{i}" if post_url else None
+        _, name, body, post_url, handle = by_id[i]
+        if post_url:
+            link = f"{post_url.rstrip('/')}/comment/{i}"
+        elif handle:
+            link = f"https://substack.com/@{handle}/note/c-{i}"
+        else:
+            link = None
         result.append({"id": i, "name": name or "?", "body": body or "", "link": link})
     return result
 
