@@ -423,6 +423,9 @@ def render_card(item, section="action"):
     source_badge = "note" if item["source"] == "activity" and "note" in item["label"] else ("comment" if item["source"] == "activity" else "your post")
     your_label = "Your post:" if item["source"] == "own_pub" else "Your content:"
 
+    handle = item.get("handle", "")
+    who_html = f'<a href="https://substack.com/@{escape(handle)}" target="_blank" class="who-link">{who}</a>' if handle else who
+
     liked_badge = '<span class="liked-badge">❤️ liked</span>' if liked else ""
     link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open on Substack →</a>' if link else ""
     thread_html = render_thread(thread)
@@ -440,7 +443,7 @@ def render_card(item, section="action"):
           {link_html}
         </div>
       </div>
-      <div class="who">{who} <span class="label">{label}</span></div>
+      <div class="who">{who_html} <span class="label">{label}</span></div>
       {"<div class='your-content'><span class='field-label'>" + your_label + "</span> " + your + "</div>" if your and not thread_html else ""}
       {thread_html}
       <div class="their-content"><span class="field-label">Their reply:</span> {theirs}</div>
@@ -654,6 +657,8 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
     .reply-link:hover {{ text-decoration: underline; }}
     .who {{ font-weight: 600; font-size: 0.97rem; margin-bottom: 8px; }}
+    .who-link {{ font-weight: 600; color: inherit; text-decoration: none; }}
+    .who-link:hover {{ color: #cc3300; text-decoration: underline; }}
     .label {{ font-weight: 400; color: #666; }}
     .field-label {{ font-size: 0.72rem; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 4px; }}
     .your-content {{
@@ -992,7 +997,6 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const likedWrap = document.getElementById('liked-toggle-wrap');
       if (likedWrap) {{
         likedWrap.style.display = (!q || visibleLiked > 0) ? '' : 'none';
-        if (q && visibleLiked > 0) document.getElementById('liked-section').style.display = 'block';
       }}
 
       // Responded
@@ -1002,7 +1006,6 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const respondedWrap = document.getElementById('responded-toggle-wrap');
       if (respondedWrap) {{
         respondedWrap.style.display = (!q || visibleResponded > 0) ? '' : 'none';
-        if (q && visibleResponded > 0) document.getElementById('responded-section').style.display = 'block';
       }}
     }}
 
