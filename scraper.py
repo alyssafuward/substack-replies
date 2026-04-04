@@ -679,40 +679,50 @@ def flatten_comments(comments):
 def load_next_post(conn, pub_subdomain):
     """
     Fetch and store the next unloaded post for a publication (newest first).
-    Uses a per-pub offset stored in sync_state to track progress.
-    Returns the post dict, or None if no more posts.
+    Scans from the newest post, skips any already in the DB, and loads the
+    first one it hasn't seen yet. This means new posts are always picked up
+    before continuing deeper into the archive.
+    Returns the post dict, or None if all posts are already loaded.
     """
-    offset_key = f"post_offset_{pub_subdomain}"
-    offset = int(get_state(conn, offset_key) or 0)
+    existing_ids = set(
+        row[0] for row in conn.execute(
+            "SELECT id FROM posts WHERE pub_subdomain=?", (pub_subdomain,)
+        ).fetchall()
+    )
 
     url = f"https://{pub_subdomain}.substack.com/api/v1/posts"
-    batch = get(url, {"limit": 1, "offset": offset})
+    offset = 0
+    batch_size = 12
 
-    if not batch:
-        print(f"{ts()} No more posts to load for {pub_subdomain}.")
-        return None
+    while True:
+        batch = get(url, {"limit": batch_size, "offset": offset})
+        if not batch:
+            print(f"{ts()} No more posts to load for {pub_subdomain}.")
+            return None
 
-    post = batch[0]
-    post_id = post["id"]
-    post_title = post.get("title", "")
-    post_url = post.get("canonical_url", f"https://{pub_subdomain}.substack.com/p/{post.get('slug','')}")
+        for post in batch:
+            if post["id"] not in existing_ids:
+                post_id = post["id"]
+                post_title = post.get("title", "")
+                post_url = post.get("canonical_url", f"https://{pub_subdomain}.substack.com/p/{post.get('slug','')}")
 
-    conn.execute("""
-        INSERT OR REPLACE INTO posts (id, pub_subdomain, title, slug, canonical_url, post_date, comment_count)
-        VALUES (?,?,?,?,?,?,?)
-    """, (post_id, pub_subdomain, post_title, post.get("slug"), post_url,
-          post.get("post_date"), post.get("comment_count", 0)))
+                conn.execute("""
+                    INSERT OR REPLACE INTO posts (id, pub_subdomain, title, slug, canonical_url, post_date, comment_count)
+                    VALUES (?,?,?,?,?,?,?)
+                """, (post_id, pub_subdomain, post_title, post.get("slug"), post_url,
+                      post.get("post_date"), post.get("comment_count", 0)))
 
-    comments = fetch_post_comments(pub_subdomain, post_id)
-    flat = flatten_comments(comments)
-    for c in flat:
-        _store_comment(conn, c, pub_subdomain=pub_subdomain, post_id=post_id,
-                       post_title=post_title, post_url=post_url)
+                comments = fetch_post_comments(pub_subdomain, post_id)
+                flat = flatten_comments(comments)
+                for c in flat:
+                    _store_comment(conn, c, pub_subdomain=pub_subdomain, post_id=post_id,
+                                   post_title=post_title, post_url=post_url)
 
-    set_state(conn, offset_key, str(offset + 1))
-    conn.commit()
-    print(f"{ts()} Loaded post: \"{post_title}\" ({len(flat)} comments)")
-    return post
+                conn.commit()
+                print(f"{ts()} Loaded post: \"{post_title}\" ({len(flat)} comments)")
+                return post
+
+        offset += len(batch)
 
 
 def load_posts_to_target(conn, pub_subdomain, target=25):
