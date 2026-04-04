@@ -55,6 +55,7 @@ def load_data(conn):
         SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json, a.is_responded
         FROM activity_items a
         WHERE a.type IN ('note_reply', 'comment_reply')
+          AND (a.is_archived IS NULL OR a.is_archived = 0)
         ORDER BY a.created_at DESC
     """).fetchall()
 
@@ -103,6 +104,7 @@ def load_data(conn):
             link = ""
 
         thread = load_thread(conn, reply_id)
+        guest_post = bool(post_url) and not any(f"{sub}.substack.com" in post_url for sub in OWN_PUBS)
 
         results.append({
             "source": "activity",
@@ -117,6 +119,7 @@ def load_data(conn):
             "comment_id": reply_id,
             "liked": liked,
             "thread": thread,
+            "guest_post": guest_post,
         })
 
     # 2. Unresponded comments on own posts
@@ -187,6 +190,68 @@ def load_responded_data(conn):
         FROM activity_items a
         WHERE a.type IN ('note_reply', 'comment_reply')
           AND a.is_responded = 1
+        ORDER BY a.created_at DESC
+    """).fetchall()
+
+    for row in rows:
+        item_id, item_type, created_at, reply_id, your_id, raw = row
+        if not reply_id or not your_id:
+            continue
+
+        reply_row = conn.execute(
+            "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
+        ).fetchone()
+        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone()
+
+        if not reply_row:
+            continue
+
+        name = reply_row[0] or reply_row[1] or "Someone"
+        reply_handle = reply_row[1] or ""
+        reply_body = reply_row[2] or ""
+        post_id = reply_row[3]
+        post_url = reply_row[4]
+        reply_raw = json.loads(reply_row[5] or "{}")
+        your_body = your_row[0] if your_row else ""
+        label = "replied to your note" if item_type == "note_reply" else "replied to your comment"
+
+        if item_type == "note_reply" and reply_handle:
+            link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
+        elif post_url:
+            link = f"{post_url.rstrip('/')}/comment/{reply_id}"
+        elif post_id:
+            link = f"https://substack.com/p/{post_id}/comment/{reply_id}"
+        else:
+            link = ""
+
+        thread = load_thread(conn, reply_id)
+
+        results.append({
+            "source": "activity",
+            "date": (created_at or "")[:10],
+            "raw_date": created_at or "",
+            "who": name,
+            "handle": reply_handle,
+            "label": label,
+            "your_body": your_body,
+            "their_body": reply_body,
+            "link": link,
+            "comment_id": reply_id,
+            "liked": bool(reply_raw.get("reaction")),
+            "thread": thread,
+        })
+
+    return results
+
+
+def load_archived_data(conn):
+    """Return activity reply items that have been archived."""
+    results = []
+    rows = conn.execute("""
+        SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
+        FROM activity_items a
+        WHERE a.type IN ('note_reply', 'comment_reply')
+          AND a.is_archived = 1
         ORDER BY a.created_at DESC
     """).fetchall()
 
@@ -433,6 +498,7 @@ def render_card(item, section="action"):
 
     liked_badge = '<span class="liked-badge">❤️ liked</span>' if liked else ""
     link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open on Substack →</a>' if link else ""
+    archive_btn = f'<button class="archive-btn" onclick="archiveCard(this, {cid})">Archive</button>' if section not in ("responded", "archived") else ""
     thread_html = render_thread(thread)
 
     who_key = escape((item["who"] + " " + item.get("handle", "")).strip().lower())
@@ -445,6 +511,7 @@ def render_card(item, section="action"):
           <span class="date">{date}</span>
         </div>
         <div class="card-actions">
+          {archive_btn}
           {link_html}
         </div>
       </div>
@@ -540,21 +607,29 @@ def render_post_comments_tab(posts_data, pub_subdomain):
   {empty_html}"""
 
 
-def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None):
+def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None):
     all_posts_data = all_posts_data or {}
     all_pubs = all_pubs or []
     responded_items = responded_items or []
+    archived_items = archived_items or []
 
     needs_response = [i for i in items if not i.get("liked")]
     reviewed = [i for i in items if i.get("liked")]
 
-    action_cards = "\n".join(render_card(i, "action") for i in needs_response)
+    direct_items = [i for i in needs_response if not i.get("guest_post")]
+    guest_items = [i for i in needs_response if i.get("guest_post")]
+
+    action_cards = "\n".join(render_card(i, "action") for i in direct_items)
+    guest_cards = "\n".join(render_card(i, "guest") for i in guest_items)
     reviewed_cards = "\n".join(render_card(i, "liked") for i in reviewed)
     responded_cards = "\n".join(render_card(i, "responded") for i in responded_items)
+    archived_cards = "\n".join(render_card(i, "archived") for i in archived_items)
 
-    count = len(needs_response)
+    count = len(direct_items)
+    guest_count = len(guest_items)
     reviewed_count = len(reviewed)
     responded_count = len(responded_items)
+    archived_count = len(archived_items)
     empty_msg = "" if count else '<div class="empty">🎉 All caught up!</div>'
 
     pub_tabs_html = "\n".join(
@@ -661,6 +736,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       font-size: 0.82rem; color: #cc3300; text-decoration: none; font-weight: 500; white-space: nowrap;
     }}
     .reply-link:hover {{ text-decoration: underline; }}
+    .archive-btn {{
+      background: none; border: 1px solid #ccc; border-radius: 4px;
+      font-size: 0.78rem; color: #999; cursor: pointer; padding: 2px 8px;
+    }}
+    .archive-btn:hover {{ background: #f5f5f5; color: #555; border-color: #aaa; }}
     .who {{ font-weight: 600; font-size: 0.97rem; margin-bottom: 8px; }}
     .who-link {{ font-weight: 600; color: inherit; text-decoration: none; }}
     .who-link:hover {{ color: #cc3300; text-decoration: underline; }}
@@ -809,8 +889,10 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       {empty_msg}
     </div>
 
+    {"<div class='toggle-section' id='guest-toggle-wrap'><button class='toggle-btn' onclick='toggleGuest(this)'>▶ Co-authored &amp; guest posts (<span id='guest-count'>" + str(guest_count) + "</span>)</button><div class='liked-section' id='guest-section'><div class='cards' id='guest-cards'>" + guest_cards + "</div></div></div>" if guest_count else ""}
     {"<div class='toggle-section' id='liked-toggle-wrap'><button class='toggle-btn' onclick='toggleLiked(this)'>▶ Liked only — no reply (<span id='liked-count'>" + str(reviewed_count) + "</span>)</button><div class='liked-section' id='liked-section'><div class='cards' id='liked-cards'>" + reviewed_cards + "</div></div></div>" if reviewed_count else ""}
     {"<div class='toggle-section' id='responded-toggle-wrap'><button class='toggle-btn' onclick='toggleResponded(this)'>▶ Responded (<span id='responded-count'>" + str(responded_count) + "</span>)</button><div class='liked-section' id='responded-section'><div class='cards' id='responded-cards'>" + responded_cards + "</div></div></div>" if responded_count else ""}
+    {"<div class='toggle-section' id='archived-toggle-wrap'><button class='toggle-btn' onclick='toggleArchived(this)'>▶ Archived (<span id='archived-count'>" + str(archived_count) + "</span>)</button><div class='liked-section' id='archived-section'><div class='cards' id='archived-cards'>" + archived_cards + "</div></div></div>" if archived_count else ""}
   </div>
 
   {pub_contents_html}
@@ -947,6 +1029,14 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       btn.textContent = open ? 'How it works ▾' : 'How it works ▴';
     }}
 
+    function toggleGuest(btn) {{
+      const section = document.getElementById('guest-section');
+      const open = section.style.display === 'block';
+      section.style.display = open ? 'none' : 'block';
+      const count = document.getElementById('guest-count');
+      btn.innerHTML = (open ? '▶ Co-authored &amp; guest posts' : '▼ Co-authored &amp; guest posts') + ' (<span id="guest-count">' + (count ? count.textContent : '') + '</span>)';
+    }}
+
     function toggleLiked(btn) {{
       const section = document.getElementById('liked-section');
       const open = section.style.display === 'block';
@@ -962,6 +1052,29 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       section.style.display = open ? 'none' : 'block';
       const count = document.getElementById('responded-count');
       btn.innerHTML = (open ? '▶ Responded' : '▼ Responded') + ' (<span id="responded-count">' + (count ? count.textContent : '') + '</span>)';
+    }}
+
+    function toggleArchived(btn) {{
+      const section = document.getElementById('archived-section');
+      const open = section.style.display === 'block';
+      section.style.display = open ? 'none' : 'block';
+      const count = document.getElementById('archived-count');
+      btn.innerHTML = (open ? '▶ Archived' : '▼ Archived') + ' (<span id="archived-count">' + (count ? count.textContent : '') + '</span>)';
+    }}
+
+    function archiveCard(btn, commentId) {{
+      fetch('/archive', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{comment_id: commentId}})
+      }}).then(r => r.json()).then(data => {{
+        if (data.ok) {{
+          const card = btn.closest('.card');
+          card.style.display = 'none';
+          const remaining = document.getElementById('remaining');
+          if (remaining) remaining.textContent = Math.max(0, parseInt(remaining.textContent) - 1);
+        }}
+      }});
     }}
 
     function filterByName(q) {{
@@ -995,6 +1108,15 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const remaining = document.getElementById('remaining');
       if (remaining) remaining.textContent = visibleAction;
 
+      // Guest / co-authored
+      const visibleGuest = filterCards('guest-cards', q);
+      const guestCount = document.getElementById('guest-count');
+      if (guestCount) guestCount.textContent = visibleGuest;
+      const guestWrap = document.getElementById('guest-toggle-wrap');
+      if (guestWrap) {{
+        guestWrap.style.display = (!q || visibleGuest > 0) ? '' : 'none';
+      }}
+
       // Liked
       const visibleLiked = filterCards('liked-cards', q);
       const likedCount = document.getElementById('liked-count');
@@ -1011,6 +1133,15 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const respondedWrap = document.getElementById('responded-toggle-wrap');
       if (respondedWrap) {{
         respondedWrap.style.display = (!q || visibleResponded > 0) ? '' : 'none';
+      }}
+
+      // Archived
+      const visibleArchived = filterCards('archived-cards', q);
+      const archivedCount = document.getElementById('archived-count');
+      if (archivedCount) archivedCount.textContent = visibleArchived;
+      const archivedWrap = document.getElementById('archived-toggle-wrap');
+      if (archivedWrap) {{
+        archivedWrap.style.display = (!q || visibleArchived > 0) ? '' : 'none';
       }}
     }}
 
