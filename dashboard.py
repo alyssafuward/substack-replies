@@ -825,7 +825,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
       <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
-      <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a>
+      <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
     </div>
     {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
   </div>
