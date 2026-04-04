@@ -119,7 +119,8 @@ def _stream(cmd):
         return
 
     if not started:
-        yield "data: (Attaching to running sync…)\n\n"
+        yield "data: __error__\n\n"
+        return
 
     yield from _tail_log(log_path)
 

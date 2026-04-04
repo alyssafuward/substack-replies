@@ -1092,7 +1092,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
         if (e.data === '__error__') {{
           _es.close(); _es = null;
           btn.style.display = ''; stopBtn.style.display = 'none';
-          status.textContent = 'Could not start sync.';
+          status.textContent = 'Sync already in progress — try again when it finishes.';
           return;
         }}
         log.textContent += e.data + '\\n';
