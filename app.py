@@ -17,7 +17,7 @@ import threading
 from pathlib import Path
 from flask import Flask, Response, request, redirect, jsonify
 
-from dashboard import load_data, load_stats, load_post_comments_data, load_responded_data, render_html
+from dashboard import load_data, load_stats, load_post_comments_data, load_responded_data, load_archived_data, render_html
 from scraper import init_db, load_next_post, refresh_post_comments
 from insights import load_all as load_insights, render_insights_html, search_commenter
 
@@ -166,6 +166,19 @@ def sync_stop():
     return ("", 204)
 
 
+@app.route("/archive", methods=["POST"])
+def archive():
+    comment_id = request.json.get("comment_id")
+    if not comment_id:
+        return jsonify({"error": "missing comment_id"}), 400
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE activity_items SET is_archived = 1 WHERE comment_id = ?",
+            (comment_id,)
+        )
+    return jsonify({"ok": True})
+
+
 @app.route("/insights")
 def insights():
     if not DB_PATH.exists():
@@ -193,10 +206,12 @@ def index():
         stats = load_stats(conn)
         all_posts_data = {pub: load_post_comments_data(conn, pub) for pub in all_pubs}
         responded_items = load_responded_data(conn)
+        archived_items = load_archived_data(conn)
 
     html = render_html(items, stats, all_posts_data=all_posts_data,
                        active_tab=active_tab, all_pubs=all_pubs,
-                       responded_items=responded_items)
+                       responded_items=responded_items,
+                       archived_items=archived_items)
     return Response(html, mimetype="text/html")
 
 
