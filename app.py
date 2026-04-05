@@ -180,6 +180,19 @@ def archive():
     return jsonify({"ok": True})
 
 
+@app.route("/unarchive", methods=["POST"])
+def unarchive():
+    comment_id = request.json.get("comment_id")
+    if not comment_id:
+        return jsonify({"error": "missing comment_id"}), 400
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE activity_items SET is_archived = 0 WHERE comment_id = ?",
+            (comment_id,)
+        )
+    return jsonify({"ok": True})
+
+
 @app.route("/insights")
 def insights():
     if not DB_PATH.exists():
@@ -352,4 +365,4 @@ def render_empty():
 if __name__ == "__main__":
     print("Starting Substack Replies...")
     print("Open http://localhost:5001 in your browser")
-    app.run(debug=False, port=5001)
+    app.run(debug=True, port=5001)

@@ -16,6 +16,17 @@ except ImportError:
 
 DB_PATH = Path(__file__).parent / "replies.db"
 
+
+def _comment_link(post_url, comment_id):
+    """Build a link to a specific comment. The home/post URL format doesn't
+    support /comment/{id} appending, so return the post URL as-is in that case."""
+    if not post_url:
+        return None
+    if "/home/post/" in post_url:
+        return post_url
+    return f"{post_url.rstrip('/')}/comment/{comment_id}"
+
+
 # ── Data ──────────────────────────────────────────────────────────────────────
 
 def load_thread(conn, reply_id):
@@ -36,12 +47,9 @@ def load_thread(conn, reply_id):
         if i not in by_id:
             continue
         _, name, body, post_url, handle = by_id[i]
-        if post_url:
-            link = f"{post_url.rstrip('/')}/comment/{i}"
-        elif handle:
+        link = _comment_link(post_url, i)
+        if not link and handle:
             link = f"https://substack.com/@{handle}/note/c-{i}"
-        else:
-            link = None
         result.append({"id": i, "name": name or "?", "body": body or "", "link": link})
     return result
 
@@ -97,7 +105,7 @@ def load_data(conn):
         if item_type == "note_reply" and reply_handle:
             link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
         elif post_url:
-            link = f"{post_url.rstrip('/')}/comment/{reply_id}"
+            link = _comment_link(post_url, reply_id)
         elif post_id:
             link = f"https://substack.com/p/{post_id}/comment/{reply_id}"
         else:
@@ -218,7 +226,7 @@ def load_responded_data(conn):
         if item_type == "note_reply" and reply_handle:
             link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
         elif post_url:
-            link = f"{post_url.rstrip('/')}/comment/{reply_id}"
+            link = _comment_link(post_url, reply_id)
         elif post_id:
             link = f"https://substack.com/p/{post_id}/comment/{reply_id}"
         else:
@@ -320,7 +328,6 @@ def _format_sync_time(iso_str):
 
 def load_stats(conn):
     activity_count = conn.execute("SELECT COUNT(*) FROM activity_items").fetchone()[0]
-    comment_count = conn.execute("SELECT COUNT(*) FROM comments").fetchone()[0]
     post_count = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
     synced_up_to = conn.execute(
         "SELECT value FROM sync_state WHERE key='last_synced_at'"
@@ -352,7 +359,6 @@ def load_stats(conn):
 
     return {
         "activity_items": activity_count,
-        "comments": comment_count,
         "posts": post_count,
         "synced_up_to": _format_sync_time(synced_up_to[0]) if synced_up_to else "never",
         "gap_warning": gap_warning,
@@ -498,7 +504,12 @@ def render_card(item, section="action"):
 
     liked_badge = '<span class="liked-badge">❤️ liked</span>' if liked else ""
     link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open on Substack →</a>' if link else ""
-    archive_btn = f'<button class="archive-btn" onclick="archiveCard(this, {cid})">Archive</button>' if section not in ("responded", "archived") else ""
+    if section == "archived":
+        archive_btn = f'<button class="archive-btn" onclick="unarchiveCard(this, {cid})">Unarchive</button>'
+    elif section not in ("responded",):
+        archive_btn = f'<button class="archive-btn" onclick="archiveCard(this, {cid})">Archive</button>'
+    else:
+        archive_btn = ""
     thread_html = render_thread(thread)
 
     who_key = escape((item["who"] + " " + item.get("handle", "")).strip().lower())
@@ -613,11 +624,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     responded_items = responded_items or []
     archived_items = archived_items or []
 
-    needs_response = [i for i in items if not i.get("liked")]
-    reviewed = [i for i in items if i.get("liked")]
+    needs_response = [i for i in items if not i.get("liked") and i.get("source") != "own_pub"]
+    reviewed = [i for i in items if i.get("liked") and i.get("source") != "own_pub"]
 
-    direct_items = [i for i in needs_response if not i.get("guest_post")]
-    guest_items = [i for i in needs_response if i.get("guest_post")]
+    direct_items = [i for i in needs_response if not i.get("guest_post") and i.get("source") != "own_pub"]
+    guest_items = [i for i in needs_response if i.get("guest_post") and i.get("source") != "own_pub"]
 
     action_cards = "\n".join(render_card(i, "action") for i in direct_items)
     guest_cards = "\n".join(render_card(i, "guest") for i in guest_items)
@@ -823,8 +834,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <h1>Substack Replies</h1>
     <div class="subtitle">Synced up to {stats['synced_up_to']}</div>
     <div class="stats">
-      <div class="stat"><strong>{stats['activity_items']}</strong>activity synced</div>
-      <div class="stat"><strong>{stats['comments']}</strong>comments stored</div>
+      <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
       <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
     </div>
     {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
@@ -1070,9 +1080,55 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }}).then(r => r.json()).then(data => {{
         if (data.ok) {{
           const card = btn.closest('.card');
-          card.style.display = 'none';
+          // Move card into archived section
+          card.dataset.section = 'archived';
+          btn.textContent = 'Unarchive';
+          btn.setAttribute('onclick', `unarchiveCard(this, ${{commentId}})`);
+          const archivedCards = document.getElementById('archived-cards');
+          const archivedWrap = document.getElementById('archived-toggle-wrap');
+          if (archivedCards) {{
+            archivedCards.prepend(card);
+            const toggleBtn = archivedWrap && archivedWrap.querySelector('.toggle-btn');
+            if (toggleBtn) {{
+              const count = archivedCards.querySelectorAll('.card').length;
+              toggleBtn.innerHTML = toggleBtn.innerHTML.replace(/\d+/, count);
+            }}
+            if (archivedWrap) archivedWrap.style.display = '';
+          }} else {{
+            card.style.display = 'none';
+          }}
+          // Update reply count
           const remaining = document.getElementById('remaining');
           if (remaining) remaining.textContent = Math.max(0, parseInt(remaining.textContent) - 1);
+        }}
+      }});
+    }}
+
+    function unarchiveCard(btn, commentId) {{
+      fetch('/unarchive', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{comment_id: commentId}})
+      }}).then(r => r.json()).then(data => {{
+        if (data.ok) {{
+          const card = btn.closest('.card');
+          card.dataset.section = 'action';
+          btn.textContent = 'Archive';
+          btn.setAttribute('onclick', `archiveCard(this, ${{commentId}})`);
+          // Move card back to action cards
+          const actionCards = document.getElementById('action-cards');
+          if (actionCards) actionCards.prepend(card);
+          // Update archived count
+          const archivedCards = document.getElementById('archived-cards');
+          const archivedWrap = document.getElementById('archived-toggle-wrap');
+          if (archivedWrap && archivedCards) {{
+            const count = archivedCards.querySelectorAll('.card').length;
+            const toggleBtn = archivedWrap.querySelector('.toggle-btn');
+            if (toggleBtn) toggleBtn.innerHTML = toggleBtn.innerHTML.replace(/\d+/, count);
+          }}
+          // Update reply count
+          const remaining = document.getElementById('remaining');
+          if (remaining) remaining.textContent = parseInt(remaining.textContent) + 1;
         }}
       }});
     }}
@@ -1352,6 +1408,9 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }})
       .catch(() => {{}});
   </script>
+  <div style="text-align:center; margin-top:48px; padding-bottom:24px; font-size:0.8rem; color:#bbb;">
+    Created by <a href="https://alyssafuward.substack.com" target="_blank" style="color:#bbb;">Alyssa Fu Ward</a>
+  </div>
 </body>
 </html>"""
 
