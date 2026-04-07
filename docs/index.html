@@ -101,6 +101,19 @@
       margin: 36px 0;
     }
 
+    .spinner {
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      border: 2px solid #ccc;
+      border-top-color: #888;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-left: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     .bottom-nav {
       display: flex;
       justify-content: space-between;
@@ -212,17 +225,23 @@
     function goBack(el) {
       var h = window.location.hostname;
       if (h === 'localhost' || h === '127.0.0.1') {
-        // served by the app — just go back
         window.location.href = '/';
       } else if (h === '') {
         // opened as a file — check if the app is running
-        fetch('http://localhost:5001', { mode: 'no-cors' })
-          .then(function() { window.location.href = 'http://localhost:5001'; })
+        el.innerHTML = '← Back to app <span class="spinner"></span>';
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 1500);
+        fetch('http://localhost:5001', { mode: 'no-cors', signal: controller.signal })
+          .then(function() {
+            clearTimeout(timer);
+            window.location.href = 'http://localhost:5001';
+          })
           .catch(function() {
+            clearTimeout(timer);
+            el.textContent = '← Back to app';
             showHint(el, 'The app isn\'t running. To start it: open Terminal, navigate to the substack-replies folder, and run <code>python app.py</code>. Then open <a href="http://localhost:5001">http://localhost:5001</a>.');
           });
       } else {
-        // GitHub Pages
         showHint(el, 'The app runs locally. Open <a href="http://localhost:5001">http://localhost:5001</a> in your browser.');
       }
     }
