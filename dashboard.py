@@ -954,10 +954,10 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
         <span class="sync-status" id="sync-status"></span>
       </div>
       <pre class="sync-log" id="sync-log" style="display:none"></pre>
-      <div id="last-sync-log-wrap" style="display:none; margin-top:6px;">
+      <div id="last-sync-log-wrap" style="display:none; margin-top:6px; margin-bottom:20px;">
         <div style="display:flex; align-items:center; gap:12px;">
           <button onclick="toggleLastLog(this)" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
-          <span style="font-size:0.78rem; color:#bbb;">Synced up to {stats['synced_up_to']}</span>
+          <span style="font-size:0.78rem; color:#888;">Synced up to {stats['synced_up_to']}</span>
         </div>
         <pre class="sync-log" id="last-sync-log" style="display:none; margin-top:4px;"></pre>
       </div>
