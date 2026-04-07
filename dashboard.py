@@ -925,7 +925,6 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
              style="margin-right:5px; cursor:pointer;">
       Treat ❤ likes as acknowledged (move to collapsed section instead of requiring archive)
     </label>
-    <span style="margin-left:8px; color:#aaa; font-size:0.78rem;">· reloads page</span>
   </div>
 
   <div id="page-loading" style="display:none; position:fixed; inset:0; background:rgba(245,244,240,0.75); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px;">
@@ -982,9 +981,13 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 
     const allPubs = {json.dumps(all_pubs)};
 
-    function setLikedAck(checked) {{
+    function showReloadOverlay() {{
       const overlay = document.getElementById('page-loading');
-      overlay.style.display = 'flex';
+      if (overlay) overlay.style.display = 'flex';
+    }}
+
+    function setLikedAck(checked) {{
+      showReloadOverlay();
       const url = new URL(window.location.href);
       url.searchParams.set('liked_ack', checked ? '1' : '0');
       window.location.href = url.toString();
@@ -1037,6 +1040,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           _loadEs.close(); _loadEs = null;
           localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
           status.textContent = 'Done — reloading…';
+          showReloadOverlay();
           setTimeout(() => window.location.href = '/?tab=' + encodeURIComponent(pub), 1500);
           return;
         }}
@@ -1064,12 +1068,13 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
             status.textContent = 'Connection lost — sync still running in background…';
             var poll = setInterval(() => {{
               fetch('/sync/status').then(r => r.json()).then(d => {{
-                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; setTimeout(() => window.location.reload(), 1500); }}
+                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; showReloadOverlay(); setTimeout(() => window.location.reload(), 1500); }}
               }});
             }}, 5000);
           }} else {{
             btn.style.display = ''; stopBtn.style.display = 'none';
             status.textContent = 'Connection lost — reloading…';
+            showReloadOverlay();
             setTimeout(() => window.location.reload(), 2000);
           }}
         }}).catch(() => {{ btn.style.display = ''; stopBtn.style.display = 'none'; status.textContent = 'Connection lost.'; }});
@@ -1388,6 +1393,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           _es.close(); _es = null;
           localStorage.setItem('lastSyncLog', log.textContent);
           status.textContent = 'Done — reloading…';
+          showReloadOverlay();
           setTimeout(() => window.location.href = '/?tab=replies', 1500);
           return;
         }}
@@ -1412,6 +1418,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           }} else {{
             btn.style.display = ''; stopBtn.style.display = 'none';
             status.textContent = 'Connection lost — sync may have completed. Reloading…';
+            showReloadOverlay();
             setTimeout(() => window.location.reload(), 2000);
           }}
         }}).catch(() => {{
@@ -1427,6 +1434,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
               _pollUntilDone();
             }} else {{
               status.textContent = 'Sync complete — reloading…';
+              showReloadOverlay();
               setTimeout(() => window.location.reload(), 1500);
             }}
           }}).catch(() => _pollUntilDone());
@@ -1460,6 +1468,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           _postsEs.close(); _postsEs = null;
           localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
           status.textContent = 'Done — reloading…';
+          showReloadOverlay();
           setTimeout(() => window.location.href = '/?tab=' + encodeURIComponent(pub), 1500);
           return;
         }}
@@ -1487,12 +1496,13 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
             status.textContent = 'Connection lost — sync still running in background…';
             var poll = setInterval(() => {{
               fetch('/sync/status').then(r => r.json()).then(d => {{
-                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; setTimeout(() => window.location.reload(), 1500); }}
+                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; showReloadOverlay(); setTimeout(() => window.location.reload(), 1500); }}
               }});
             }}, 5000);
           }} else {{
             btn.style.display = ''; stopBtn.style.display = 'none';
             status.textContent = 'Connection lost — reloading…';
+            showReloadOverlay();
             setTimeout(() => window.location.reload(), 2000);
           }}
         }}).catch(() => {{ btn.style.display = ''; stopBtn.style.display = 'none'; status.textContent = 'Connection lost.'; }});
