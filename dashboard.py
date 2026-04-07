@@ -594,12 +594,14 @@ def render_post_comment_card(c):
     </div>"""
 
 
-def render_post_section(post):
+def render_post_section(post, liked_acknowledged=True):
     title = escape(post["title"])
     url = post["url"]
     post_date = escape(post["post_date"])
     unanswered = post["unanswered"]
-    liked = post["liked"]
+    liked = post["liked"] if liked_acknowledged else []
+    if not liked_acknowledged:
+        unanswered = unanswered + post["liked"]
     responded = post.get("responded", [])
 
     title_link = f'<a href="{escape(url)}" target="_blank">{title}</a>' if url else title
@@ -613,7 +615,7 @@ def render_post_section(post):
             liked_html = "\n".join(render_post_comment_card(c) for c in liked)
             body += f"""
       <div class="toggle-section" style="margin-top:8px;">
-        <button class="toggle-btn" onclick="toggleSection(this)">▶ Show liked comments ({len(liked)})</button>
+        <button class="toggle-btn" onclick="toggleSection(this)">▶ Liked ({len(liked)})</button>
         <div class="liked-section" style="display:none;">{liked_html}</div>
       </div>"""
         if responded:
@@ -627,9 +629,9 @@ def render_post_section(post):
     return f'<div class="post-section">{header}{body}</div>'
 
 
-def render_post_comments_tab(posts_data, pub_subdomain):
+def render_post_comments_tab(posts_data, pub_subdomain, liked_acknowledged=True):
     total = sum(len(p["unanswered"]) for p in posts_data)
-    posts_html = "\n".join(render_post_section(p) for p in posts_data)
+    posts_html = "\n".join(render_post_section(p, liked_acknowledged) for p in posts_data)
     pub_esc = escape(pub_subdomain)
 
     if not posts_data:
@@ -701,7 +703,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
         for p in all_pubs
     )
     pub_contents_html = "\n".join(
-        f'<div id="tab-content-{escape(p)}" style="display:none">{render_post_comments_tab(all_posts_data.get(p, []), p)}</div>'
+        f'<div id="tab-content-{escape(p)}" style="display:none">{render_post_comments_tab(all_posts_data.get(p, []), p, liked_acknowledged)}</div>'
         for p in all_pubs
     )
 
@@ -898,7 +900,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       <h3>Responded</h3>
       Once you've replied to something, it moves to the collapsed Responded section so you can focus on what's still open.
       <h3>Liked</h3>
-      Liking a reply on Substack marks it as acknowledged and moves it to a collapsed section. Use the toggle to change this behavior.
+      Liking a reply on Substack marks it as acknowledged and moves it to a collapsed section on both the Replies and Publications tabs. Use the toggle below the search bar to turn this off — liked items will stay in the main queue until you respond or archive them. Note: archive is available on the Replies tab only; Publications comments can't be archived yet.
       <h3>Search</h3>
       Search by name, keyword, or phrase — filters across all tabs simultaneously. Match counts appear in each tab label.
       <h3>Your data</h3>
