@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Substack Replies — How it works</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f4f0;
+      color: #1a1a1a;
+      padding: 40px 20px 80px;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    .back {
+      display: inline-block;
+      font-size: 0.82rem;
+      color: #aaa;
+      text-decoration: none;
+      margin-bottom: 32px;
+    }
+    .back:hover { color: #666; }
+
+    h1 {
+      font-size: 1.7rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .tagline {
+      font-size: 0.95rem;
+      color: #666;
+      margin-bottom: 32px;
+    }
+
+    .note {
+      background: white;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 0.84rem;
+      color: #777;
+      margin-bottom: 36px;
+      line-height: 1.5;
+    }
+
+    .section {
+      background: white;
+      border: 1px solid #e5e5e5;
+      border-radius: 10px;
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #ff3300;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 6px;
+    }
+
+    .section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .section p {
+      font-size: 0.88rem;
+      color: #555;
+      line-height: 1.65;
+    }
+
+    .section p + p {
+      margin-top: 8px;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid #e5e5e5;
+      margin: 36px 0;
+    }
+
+    .cta {
+      text-align: center;
+      padding: 8px 0;
+    }
+
+    .cta p {
+      font-size: 0.88rem;
+      color: #666;
+      margin-bottom: 14px;
+    }
+
+    .cta a {
+      display: inline-block;
+      background: #ff3300;
+      color: white;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 10px 24px;
+      border-radius: 7px;
+    }
+
+    .cta a:hover { background: #e02d00; }
+
+    .footer {
+      margin-top: 48px;
+      text-align: center;
+      font-size: 0.8rem;
+      color: #bbb;
+    }
+
+    .footer a { color: #bbb; }
+    .footer a:hover { color: #888; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <a class="back" href="https://github.com/alyssafuward/substack-replies">← Back to repo</a>
+
+    <h1>Substack Replies</h1>
+    <p class="tagline">A personal tool for Substack writers who want one place to see what still needs a response — across notes, comments, and your own posts.</p>
+
+    <div class="note">
+      This is not a managed service. It runs locally on your computer, stores your data in a local database, and talks to Substack directly using your own session. Nothing is hosted anywhere.
+    </div>
+
+    <div class="section">
+      <div class="section-label">Replies tab</div>
+      <p>Replies to your Substack Notes, and replies to comments you've left on other people's posts and Notes. Shows what still needs a response.</p>
+      <p>Use <strong>Sync</strong> to pull in new activity. You can set how many new replies to fetch at a time — the app rechecks your existing unresponded items first, then pulls in the most recent new replies up to your limit, then fills in older history if there's still room.</p>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Publication tabs</div>
+      <p>One tab per publication you own. Shows comments on your own posts. Use <strong>Load posts</strong> to pull in posts and their comments for the first time; use <strong>Sync</strong> to check for new activity — only posts where the comment count changed are re-fetched.</p>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Search</div>
+      <p>Filter by name, keyword, or phrase across all tabs simultaneously. Match counts appear in each tab label.</p>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Liked toggle</div>
+      <p>If you ❤️ a reply on Substack, the app can treat that as "seen and acknowledged" and move it to a collapsed section on both the Replies and Publications tabs. Use the toggle below the search bar to turn this off — liked items will stay in the main queue until you respond or archive them.</p>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Archive</div>
+      <p>Dismiss a reply without responding to it. Useful for spam, drive-bys, or things you've read but don't want cluttering your queue. Available on the Replies tab only; Publications comments can't be archived yet.</p>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Co-authored &amp; guest posts</div>
+      <p>Replies from posts you've written for other publications show up in a separate collapsed section in the Replies tab, since they need a different kind of attention.</p>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Responded</div>
+      <p>Once you've replied to something, it moves to a collapsed Responded section so you can focus on what's still open.</p>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Your data</div>
+      <p>Everything lives in a local SQLite database. No cloud sync, no sharing. Data persists across page refreshes.</p>
+    </div>
+
+    <hr>
+
+    <div class="cta">
+      <p>Ready to set it up?</p>
+      <a href="https://github.com/alyssafuward/substack-replies#getting-started">Get started →</a>
+    </div>
+
+    <div class="footer">
+      Built by <a href="https://alyssafuward.substack.com">Alyssa Fu Ward</a>
+    </div>
+
+  </div>
+</body>
+</html>

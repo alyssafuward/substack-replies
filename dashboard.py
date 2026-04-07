@@ -847,19 +847,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
     .toggle-btn:hover {{ color: #666; }}
     .intro {{ max-width: 720px; margin: 0 auto 16px; font-size: 0.88rem; color: #666; line-height: 1.5; }}
-    .how-it-works-toggle {{
-      background: none; border: none; cursor: pointer;
-      font-size: 0.8rem; color: #bbb; padding: 0; margin-top: 6px;
-      display: block; text-decoration: underline; text-underline-offset: 2px;
+    .how-it-works-link {{
+      font-size: 0.8rem; color: #bbb; margin-top: 6px;
+      display: block; text-underline-offset: 2px;
     }}
-    .how-it-works-toggle:hover {{ color: #888; }}
-    .how-it-works {{
-      display: none; margin-top: 12px; padding: 14px 16px;
-      background: white; border-radius: 8px; border: 1px solid #e5e5e5;
-      font-size: 0.84rem; color: #555; line-height: 1.6;
-    }}
-    .how-it-works h3 {{ font-size: 0.78rem; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 4px; }}
-    .how-it-works h3:first-child {{ margin-top: 0; }}
+    .how-it-works-link:hover {{ color: #888; }}
     .liked-section {{ display: none; margin-top: 10px; }}
     .liked-section .card {{ opacity: 0.55; background: #fafafa; }}
     .liked-section .card:hover {{ opacity: 0.8; }}
@@ -891,21 +883,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   <div class="header">
     <h1>Substack Replies</h1>
     <div class="tagline">Stay on top of replies across your Substack notes, comments, and posts.</div>
-    <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
-    <div class="how-it-works" id="how-it-works">
-      <h3>Replies tab</h3>
-      Shows replies to your notes and comments across Substack. Sync to pull in new activity. Items that need a response appear in the main queue.
-      <h3>Publication tabs</h3>
-      Shows comments on your own posts that haven't been answered. Click <strong>Load posts</strong> to fetch posts (newest first). Click <strong>Sync</strong> to check already-loaded posts for new comments — only posts where the comment count changed are re-fetched.
-      <h3>Responded</h3>
-      Once you've replied to something, it moves to the collapsed Responded section so you can focus on what's still open.
-      <h3>Liked</h3>
-      Liking a reply on Substack marks it as acknowledged and moves it to a collapsed section on both the Replies and Publications tabs. Use the toggle below the search bar to turn this off — liked items will stay in the main queue until you respond or archive them. Note: archive is available on the Replies tab only; Publications comments can't be archived yet.
-      <h3>Search</h3>
-      Search by name, keyword, or phrase — filters across all tabs simultaneously. Match counts appear in each tab label.
-      <h3>Your data</h3>
-      Everything lives in a local SQLite database — no cloud sync, no sharing. Data persists across page refreshes.
-    </div>
+    <a class="how-it-works-link" href="https://alyssafuward.github.io/substack-replies" target="_blank" rel="noopener">How it works ↗</a>
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
       <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
@@ -1120,13 +1098,6 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const open = older.style.display === 'block';
       older.style.display = open ? 'none' : 'block';
       btn.textContent = open ? btn.textContent.replace('▲', '▶') : btn.textContent.replace('▶', '▲');
-    }}
-
-    function toggleHowItWorks(btn) {{
-      const el = document.getElementById('how-it-works');
-      const open = el.style.display === 'block';
-      el.style.display = open ? 'none' : 'block';
-      btn.textContent = open ? 'How it works ▾' : 'How it works ▴';
     }}
 
     function toggleGuest(btn) {{
