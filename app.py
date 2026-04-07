@@ -118,10 +118,7 @@ def _stream(cmd):
         yield "data: __error__\n\n"
         return
 
-    if not started:
-        yield "data: __error__\n\n"
-        return
-
+    # Whether we started a new sync or attached to an existing one, tail the log
     yield from _tail_log(log_path)
 
 
