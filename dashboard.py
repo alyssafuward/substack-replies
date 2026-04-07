@@ -883,7 +883,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   <div class="header">
     <h1>Substack Replies</h1>
     <div class="tagline">Stay on top of replies across your Substack notes, comments, and posts.</div>
-    <a class="how-it-works-link" href="https://alyssafuward.github.io/substack-replies" target="_blank" rel="noopener">How it works ↗</a>
+    <a class="how-it-works-link" href="/how-it-works" target="_blank" rel="noopener">How it works ↗</a>
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
       <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->

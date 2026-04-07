@@ -190,6 +190,12 @@ def unarchive():
     return jsonify({"ok": True})
 
 
+@app.route("/how-it-works")
+def how_it_works():
+    p = Path(__file__).parent / "docs" / "index.html"
+    return Response(p.read_text(), mimetype="text/html")
+
+
 @app.route("/insights")
 def insights():
     if not DB_PATH.exists():
