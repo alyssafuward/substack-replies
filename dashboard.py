@@ -881,6 +881,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     .your-reply-preview {{ margin-top: 5px; font-size: 0.82rem; color: #888; font-style: italic; }}
     .posts-controls {{ max-width: 720px; margin: 0 auto 20px; }}
     a {{ color: #bbb; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
   </style>
 </head>
 <body>
@@ -924,6 +925,12 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
              style="margin-right:5px; cursor:pointer;">
       Treat ❤ likes as acknowledged (move to collapsed section instead of requiring archive)
     </label>
+    <span style="margin-left:8px; color:#aaa; font-size:0.78rem;">· reloads page</span>
+  </div>
+
+  <div id="page-loading" style="display:none; position:fixed; inset:0; background:rgba(245,244,240,0.75); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px;">
+    <div style="width:28px; height:28px; border:3px solid #ddd; border-top-color:#cc3300; border-radius:50%; animation:spin 0.7s linear infinite;"></div>
+    <div style="font-size:0.85rem; color:#666;">Reloading…</div>
   </div>
 
   <div class="tab-nav">
@@ -976,6 +983,8 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     const allPubs = {json.dumps(all_pubs)};
 
     function setLikedAck(checked) {{
+      const overlay = document.getElementById('page-loading');
+      overlay.style.display = 'flex';
       const url = new URL(window.location.href);
       url.searchParams.set('liked_ack', checked ? '1' : '0');
       window.location.href = url.toString();
