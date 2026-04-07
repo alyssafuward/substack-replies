@@ -20,27 +20,6 @@
       margin: 0 auto;
     }
 
-    .back {
-      display: inline-block;
-      font-size: 0.82rem;
-      color: #aaa;
-      text-decoration: none;
-      margin-bottom: 32px;
-      cursor: pointer;
-    }
-    .back:hover { color: #666; }
-
-    .app-hint {
-      display: none;
-      margin-top: 8px;
-      font-size: 0.82rem;
-      color: #666;
-      background: white;
-      border: 1px solid #e5e5e5;
-      border-radius: 6px;
-      padding: 8px 12px;
-    }
-
     h1 {
       font-size: 1.7rem;
       font-weight: 700;
@@ -60,12 +39,12 @@
       padding: 12px 16px;
       font-size: 0.84rem;
       color: #777;
-      margin-bottom: 36px;
+      margin-bottom: 12px;
       line-height: 1.5;
     }
 
-    .note + .note {
-      margin-top: -24px;
+    .notes-group {
+      margin-bottom: 36px;
     }
 
     .section {
@@ -101,62 +80,32 @@
       margin: 36px 0;
     }
 
-    .spinner {
-      display: inline-block;
-      width: 11px;
-      height: 11px;
-      border: 2px solid #ccc;
-      border-top-color: #888;
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-      vertical-align: middle;
-      margin-left: 6px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .bottom-nav {
+    .footer {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-
-    .footer {
-      margin-top: 48px;
-      text-align: center;
+      margin-top: 36px;
       font-size: 0.8rem;
       color: #bbb;
     }
 
     .footer a { color: #bbb; }
     .footer a:hover { color: #888; }
-
-    .new-here {
-      font-size: 0.82rem;
-      color: #aaa;
-    }
-    .new-here a { color: #aaa; }
-    .new-here a:hover { color: #666; }
   </style>
 </head>
 <body>
   <div class="container">
 
-    <a class="back" id="back-top" onclick="goBack(this)">← Back to app</a>
-    <div class="app-hint" id="hint-top"></div>
-
-    <br>
-
     <h1>Substack Replies</h1>
     <p class="tagline">A personal tool for Substack writers who want one place to see what still needs a response — across notes, comments, and your own posts.</p>
 
-    <div class="note">
-      This is not a managed service. It runs locally on your computer, stores your data in a local database, and talks to Substack directly using your own session. Nothing is hosted anywhere.
-    </div>
-
-    <div class="note">
-      <strong>Note on the API:</strong> This uses Substack's internal API, which is unofficial, undocumented, and intended for personal use only. It works as of writing but could break if Substack changes things. The API is rate-limited — if you hit the limit, the app will stop and ask you to try again in a few minutes.
+    <div class="notes-group">
+      <div class="note">
+        This is not a managed service. It runs locally on your computer, stores your data in a local database, and talks to Substack directly using your own session. Nothing is hosted anywhere.
+      </div>
+      <div class="note">
+        <strong>Note on the API:</strong> This uses Substack's internal API, which is unofficial, undocumented, and intended for personal use only. It works as of writing but could break if Substack changes things. The API is rate-limited — if you hit the limit, the app will stop and ask you to try again in a few minutes.
+      </div>
     </div>
 
     <div class="section">
@@ -200,51 +149,11 @@
       <p>Everything lives in a local SQLite database. No cloud sync, no sharing. Data persists across page refreshes.</p>
     </div>
 
-    <hr>
-
-    <div class="bottom-nav">
-      <a class="back" id="back-bottom" onclick="goBack(this)">← Back to app</a>
-      <div class="new-here">New here? <a href="https://github.com/alyssafuward/substack-replies#getting-started" target="_blank" rel="noopener">Get started →</a></div>
-    </div>
-    <div class="app-hint" id="hint-bottom" style="margin-top:8px;"></div>
-
     <div class="footer">
-      Built by <a href="https://alyssafuward.substack.com">Alyssa Fu Ward</a>
+      <span>Built by <a href="https://alyssafuward.substack.com">Alyssa Fu Ward</a></span>
+      <span>New here? <a href="https://github.com/alyssafuward/substack-replies#getting-started" target="_blank" rel="noopener">Get started →</a></span>
     </div>
 
   </div>
-
-  <script>
-    function showHint(el, msg) {
-      var hintId = el.id === 'back-top' ? 'hint-top' : 'hint-bottom';
-      var hint = document.getElementById(hintId);
-      if (msg) hint.innerHTML = msg;
-      hint.style.display = 'block';
-    }
-
-    function goBack(el) {
-      var h = window.location.hostname;
-      if (h === 'localhost' || h === '127.0.0.1') {
-        window.location.href = '/';
-      } else if (h === '') {
-        // opened as a file — check if the app is running
-        el.innerHTML = '← Back to app <span class="spinner"></span>';
-        var controller = new AbortController();
-        var timer = setTimeout(function() { controller.abort(); }, 1500);
-        fetch('http://localhost:5001', { mode: 'no-cors', signal: controller.signal })
-          .then(function() {
-            clearTimeout(timer);
-            window.location.href = 'http://localhost:5001';
-          })
-          .catch(function() {
-            clearTimeout(timer);
-            el.textContent = '← Back to app';
-            showHint(el, 'The app isn\'t running. To start it: open Terminal, navigate to the substack-replies folder, and run <code>python app.py</code>. Then open <a href="http://localhost:5001">http://localhost:5001</a>.');
-          });
-      } else {
-        showHint(el, 'The app runs locally. Open <a href="http://localhost:5001">http://localhost:5001</a> in your browser.');
-      }
-    }
-  </script>
 </body>
 </html>
