@@ -26,7 +26,7 @@ Then follow the appropriate path below.
 ## PATH 1: Launch the app
 
 ```bash
-flask run --port 5001
+python app.py
 ```
 
 Then open http://localhost:5001. Walk them through what they're looking at if needed:
@@ -48,7 +48,7 @@ Ask them to describe what they want to change in plain language. Then:
 1. Figure out which file(s) are involved
 2. Explain what you're going to do before doing it
 3. Make the change
-4. Tell them to refresh the app (or restart `flask run`) to see the result
+4. Tell them to refresh the app (or restart `python app.py`) to see the result
 
 Key files:
 
