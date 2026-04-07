@@ -262,11 +262,12 @@ def recheck_unresponded(conn):
     rows = conn.execute("""
         SELECT a.id, a.comment_id, a.target_post_id
         FROM activity_items a
-        LEFT JOIN comments c ON c.id = a.comment_id
+        JOIN comments c ON c.id = a.comment_id
         WHERE a.is_responded = 0
           AND a.type = 'comment_reply'
           AND a.comment_id IS NOT NULL
-          AND (c.raw_json IS NULL OR json_extract(c.raw_json, '$.reaction') IS NULL)  -- liked = acknowledged, skip recheck
+          AND a.is_archived = 0
+          AND json_extract(c.raw_json, '$.reaction') IS NULL  -- liked = acknowledged, skip recheck
         ORDER BY a.updated_at DESC
         LIMIT ?
     """, (UNRESPONDED_TARGET * 2,)).fetchall()
