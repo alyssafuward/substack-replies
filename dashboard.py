@@ -900,7 +900,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       <h3>Liked</h3>
       Liking a reply on Substack marks it as acknowledged and moves it to a collapsed section. Use the toggle to change this behavior.
       <h3>Search</h3>
-      The search bar filters across all tabs simultaneously. Match counts appear in each tab label.
+      Search by name, keyword, or phrase — filters across all tabs simultaneously. Match counts appear in each tab label.
       <h3>Your data</h3>
       Everything lives in a local SQLite database — no cloud sync, no sharing. Data persists across page refreshes.
     </div>
@@ -917,7 +917,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   </div>
 
   <div style="max-width:720px; margin:0 auto 10px;">
-    <input type="text" id="global-search" placeholder="Search across all tabs…" oninput="globalSearch(this.value)"
+    <input type="text" id="global-search" placeholder="Search by name, keyword, or phrase across all tabs…" oninput="globalSearch(this.value)"
            style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
   </div>
   <div style="max-width:720px; margin:0 auto 10px; font-size:0.82rem; color:#666;">
