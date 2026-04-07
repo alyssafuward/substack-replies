@@ -131,9 +131,7 @@
   <div class="container">
 
     <a class="back" id="back-top" onclick="goBack(this)">← Back to app</a>
-    <div class="app-hint" id="hint-top">
-      The app runs locally. Open <a href="http://localhost:5001">http://localhost:5001</a> in your browser.
-    </div>
+    <div class="app-hint" id="hint-top"></div>
 
     <br>
 
@@ -195,9 +193,7 @@
       <a class="back" id="back-bottom" onclick="goBack(this)">← Back to app</a>
       <div class="new-here">New here? <a href="https://github.com/alyssafuward/substack-replies#getting-started" target="_blank" rel="noopener">Get started →</a></div>
     </div>
-    <div class="app-hint" id="hint-bottom" style="margin-top:8px;">
-      The app runs locally. Open <a href="http://localhost:5001">http://localhost:5001</a> in your browser.
-    </div>
+    <div class="app-hint" id="hint-bottom" style="margin-top:8px;"></div>
 
     <div class="footer">
       Built by <a href="https://alyssafuward.substack.com">Alyssa Fu Ward</a>
@@ -206,12 +202,28 @@
   </div>
 
   <script>
+    function showHint(el, msg) {
+      var hintId = el.id === 'back-top' ? 'hint-top' : 'hint-bottom';
+      var hint = document.getElementById(hintId);
+      if (msg) hint.innerHTML = msg;
+      hint.style.display = 'block';
+    }
+
     function goBack(el) {
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      var h = window.location.hostname;
+      if (h === 'localhost' || h === '127.0.0.1') {
+        // served by the app — just go back
         window.location.href = '/';
+      } else if (h === '') {
+        // opened as a file — check if the app is running
+        fetch('http://localhost:5001', { mode: 'no-cors' })
+          .then(function() { window.location.href = 'http://localhost:5001'; })
+          .catch(function() {
+            showHint(el, 'The app isn\'t running. To start it: open Terminal, navigate to the substack-replies folder, and run <code>python app.py</code>. Then open <a href="http://localhost:5001">http://localhost:5001</a>.');
+          });
       } else {
-        var hintId = el.id === 'back-top' ? 'hint-top' : 'hint-bottom';
-        document.getElementById(hintId).style.display = 'block';
+        // GitHub Pages
+        showHint(el, 'The app runs locally. Open <a href="http://localhost:5001">http://localhost:5001</a> in your browser.');
       }
     }
   </script>
