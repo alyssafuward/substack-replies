@@ -896,17 +896,21 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   </div>
 
   <div class="intro">
-    Track and respond to comments across your Substack publications. <strong>Replies</strong> shows activity from your notes and comments. Each publication tab shows unanswered comments on your posts — load posts to build up the list, sync to refresh.
+    Stay on top of replies across your Substack notes, comments, and posts.
     <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
     <div class="how-it-works" id="how-it-works">
       <h3>Replies tab</h3>
-      Shows notes and comments across Substack where someone replied to you and you haven't responded yet.
+      Shows replies to your notes and comments across Substack. Sync to pull in new activity. Items that need a response appear in the main queue.
       <h3>Publication tabs</h3>
-      Shows unanswered comments on your own posts. Click <strong>Load posts</strong> to fetch posts (newest first) until you hit your target count of unanswered comments. <strong>Sync</strong> refreshes already-loaded posts with the latest comments.
-      <h3>Liked = acknowledged</h3>
-      If you've liked a comment on Substack, it's treated as acknowledged and moved to a collapsed section rather than shown as needing a response.
-      <h3>Keeping data fresh</h3>
-      Data lives in a local database and persists across page refreshes. Use Sync to update it.
+      Shows comments on your own posts that haven't been answered. Click <strong>Load posts</strong> to fetch posts (newest first). Click <strong>Sync</strong> to check already-loaded posts for new comments — only posts where the comment count changed are re-fetched.
+      <h3>Responded</h3>
+      Once you've replied to something, it moves to the collapsed Responded section so you can focus on what's still open.
+      <h3>Liked</h3>
+      Liking a reply on Substack marks it as acknowledged and moves it to a collapsed section. Use the toggle to change this behavior.
+      <h3>Search</h3>
+      The search bar filters across all tabs simultaneously. Match counts appear in each tab label.
+      <h3>Your data</h3>
+      Everything lives in a local SQLite database — no cloud sync, no sharing. Data persists across page refreshes.
     </div>
   </div>
 
