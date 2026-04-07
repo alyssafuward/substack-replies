@@ -719,7 +719,8 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
     .header {{ max-width: 720px; margin: 0 auto 16px; }}
     h1 {{ font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }}
-    .subtitle {{ color: #666; font-size: 0.9rem; }}
+    .tagline {{ font-size: 1.15rem; color: #444; margin-top: 6px; margin-bottom: 6px; }}
+    .subtitle {{ color: #aaa; font-size: 0.78rem; margin-top: 8px; }}
     .stats {{ display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }}
     .stat {{
       background: white; border-radius: 8px; padding: 8px 14px;
@@ -887,16 +888,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 <body>
   <div class="header">
     <h1>Substack Replies</h1>
-    <div class="subtitle">Synced up to {stats['synced_up_to']}</div>
-    <div class="stats">
-      <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
-      <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
-    </div>
-    {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
-  </div>
-
-  <div class="intro">
-    Stay on top of replies across your Substack notes, comments, and posts.
+    <div class="tagline">Stay on top of replies across your Substack notes, comments, and posts.</div>
     <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
     <div class="how-it-works" id="how-it-works">
       <h3>Replies tab</h3>
@@ -908,10 +900,15 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       <h3>Liked</h3>
       Liking a reply on Substack marks it as acknowledged and moves it to a collapsed section. Use the toggle to change this behavior.
       <h3>Search</h3>
-      The search bar filters across all tabs simultaneously. Match counts appear in each tab label.
+      Search by name, keyword, or phrase — filters across all tabs simultaneously. Match counts appear in each tab label.
       <h3>Your data</h3>
       Everything lives in a local SQLite database — no cloud sync, no sharing. Data persists across page refreshes.
     </div>
+    <div class="stats">
+      <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
+      <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
+    </div>
+    {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
   </div>
 
   <div id="sync-busy-banner" style="display:none; max-width:720px; margin:0 auto 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px 16px; font-size:0.88rem; color:#856404;">
@@ -919,7 +916,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   </div>
 
   <div style="max-width:720px; margin:0 auto 10px;">
-    <input type="text" id="global-search" placeholder="Search across all tabs…" oninput="globalSearch(this.value)"
+    <input type="text" id="global-search" placeholder="Search by name, keyword, or phrase across all tabs…" oninput="globalSearch(this.value)"
            style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
   </div>
   <div style="max-width:720px; margin:0 auto 10px; font-size:0.82rem; color:#666;">
@@ -957,8 +954,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
         <span class="sync-status" id="sync-status"></span>
       </div>
       <pre class="sync-log" id="sync-log" style="display:none"></pre>
-      <div id="last-sync-log-wrap" style="display:none; margin-top:6px;">
-        <button onclick="toggleLastLog(this)" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
+      <div id="last-sync-log-wrap" style="display:none; margin-top:6px; margin-bottom:20px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <button onclick="toggleLastLog(this)" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
+          <span style="font-size:0.78rem; color:#888;">Synced up to {stats['synced_up_to']}</span>
+        </div>
         <pre class="sync-log" id="last-sync-log" style="display:none; margin-top:4px;"></pre>
       </div>
     </div>
