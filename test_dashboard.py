@@ -399,5 +399,82 @@ class TestRenderPostCommentCard(unittest.TestCase):
         self.assertIn("liked-badge", html)
 
 
+# ── render_html: liked_acknowledged toggle ────────────────────────────────────
+
+def make_item(item_id, liked=False, source="activity", guest_post=False):
+    """Minimal item dict that render_html can handle."""
+    return {
+        "id": item_id,
+        "comment_id": item_id,
+        "their_body": "some comment",
+        "your_body": "my note",
+        "who": "Alice",
+        "handle": "alice",
+        "date": "2026-01-01",
+        "link": "https://example.com",
+        "liked": liked,
+        "source": source,
+        "guest_post": guest_post,
+        "label": "note reply",
+        "reply_back": "",
+    }
+
+EMPTY_STATS = {
+    "total": 0, "responded": 0, "liked": 0, "archived": 0,
+    "last_sync": None, "gap_warning": None, "synced_up_to": "never",
+    "activity_items": 0,
+}
+
+
+class TestLikedAcknowledgedToggle(unittest.TestCase):
+
+    def test_liked_item_in_reviewed_when_toggle_on(self):
+        """liked_acknowledged=True: liked items go to reviewed, not main queue."""
+        items = [make_item(1, liked=True), make_item(2, liked=False)]
+        html = dashboard.render_html(items, EMPTY_STATS, liked_acknowledged=True)
+        # Main queue has 1 (the non-liked one)
+        self.assertIn(">1<", html)  # count span
+        self.assertIn("reply need", html)
+        # Liked section div is rendered
+        self.assertIn("id='liked-toggle-wrap'", html)
+
+    def test_liked_item_in_queue_when_toggle_off(self):
+        """liked_acknowledged=False: liked items stay in main queue."""
+        items = [make_item(1, liked=True), make_item(2, liked=False)]
+        html = dashboard.render_html(items, EMPTY_STATS, liked_acknowledged=False)
+        # Both items in main queue → count = 2
+        self.assertIn(">2<", html)  # count span
+        self.assertIn("replies need", html)
+        # Liked section div not rendered
+        self.assertNotIn('id=\'liked-toggle-wrap\'', html)
+
+    def test_toggle_on_is_default(self):
+        """Default behavior (no arg) treats liked as acknowledged."""
+        items = [make_item(1, liked=True)]
+        html = dashboard.render_html(items, EMPTY_STATS)
+        # Main queue is empty (only liked item, which goes to reviewed)
+        self.assertIn("All caught up", html)
+
+    def test_toggle_off_liked_items_visible_in_queue(self):
+        """With toggle off, an all-liked list still shows items needing response."""
+        items = [make_item(1, liked=True), make_item(2, liked=True)]
+        html = dashboard.render_html(items, EMPTY_STATS, liked_acknowledged=False)
+        self.assertIn("replies need", html)
+        self.assertNotIn("All caught up", html)
+
+    def test_checkbox_checked_when_toggle_on(self):
+        """Checkbox is checked when liked_acknowledged=True."""
+        items = []
+        html = dashboard.render_html(items, EMPTY_STATS, liked_acknowledged=True)
+        self.assertIn('id="liked-ack-toggle" checked', html)
+
+    def test_checkbox_unchecked_when_toggle_off(self):
+        """Checkbox is not checked when liked_acknowledged=False."""
+        items = []
+        html = dashboard.render_html(items, EMPTY_STATS, liked_acknowledged=False)
+        self.assertIn('id="liked-ack-toggle"', html)
+        self.assertNotIn('id="liked-ack-toggle" checked', html)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -214,6 +214,7 @@ def index():
     from config import OWN_PUBS
     all_pubs = list(OWN_PUBS.keys())
     active_tab = request.args.get("tab", "replies")
+    liked_ack = request.args.get("liked_ack", "1") != "0"
 
     with sqlite3.connect(DB_PATH) as conn:
         items = load_data(conn)
@@ -225,7 +226,8 @@ def index():
     html = render_html(items, stats, all_posts_data=all_posts_data,
                        active_tab=active_tab, all_pubs=all_pubs,
                        responded_items=responded_items,
-                       archived_items=archived_items)
+                       archived_items=archived_items,
+                       liked_acknowledged=liked_ack)
     return Response(html, mimetype="text/html")
 
 

@@ -667,14 +667,18 @@ def render_post_comments_tab(posts_data, pub_subdomain):
   {empty_html}"""
 
 
-def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None):
+def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None, liked_acknowledged=True):
     all_posts_data = all_posts_data or {}
     all_pubs = all_pubs or []
     responded_items = responded_items or []
     archived_items = archived_items or []
 
-    needs_response = [i for i in items if not i.get("liked") and i.get("source") != "own_pub"]
-    reviewed = [i for i in items if i.get("liked") and i.get("source") != "own_pub"]
+    if liked_acknowledged:
+        needs_response = [i for i in items if not i.get("liked") and i.get("source") != "own_pub"]
+        reviewed = [i for i in items if i.get("liked") and i.get("source") != "own_pub"]
+    else:
+        needs_response = [i for i in items if i.get("source") != "own_pub"]
+        reviewed = []
 
     direct_items = [i for i in needs_response if not i.get("guest_post") and i.get("source") != "own_pub"]
     guest_items = [i for i in needs_response if i.get("guest_post") and i.get("source") != "own_pub"]
@@ -877,6 +881,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     .your-reply-preview {{ margin-top: 5px; font-size: 0.82rem; color: #888; font-style: italic; }}
     .posts-controls {{ max-width: 720px; margin: 0 auto 20px; }}
     a {{ color: #bbb; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
   </style>
 </head>
 <body>
@@ -912,6 +917,19 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   <div style="max-width:720px; margin:0 auto 10px;">
     <input type="text" id="global-search" placeholder="Search across all tabs…" oninput="globalSearch(this.value)"
            style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+  </div>
+  <div style="max-width:720px; margin:0 auto 10px; font-size:0.82rem; color:#666;">
+    <label style="cursor:pointer; user-select:none;">
+      <input type="checkbox" id="liked-ack-toggle" {"checked" if liked_acknowledged else ""}
+             onchange="setLikedAck(this.checked)"
+             style="margin-right:5px; cursor:pointer;">
+      Treat ❤ likes as acknowledged (move to collapsed section instead of requiring archive)
+    </label>
+  </div>
+
+  <div id="page-loading" style="display:none; position:fixed; inset:0; background:rgba(245,244,240,0.75); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px;">
+    <div style="width:28px; height:28px; border:3px solid #ddd; border-top-color:#cc3300; border-radius:50%; animation:spin 0.7s linear infinite;"></div>
+    <div style="font-size:0.85rem; color:#666;">Reloading…</div>
   </div>
 
   <div class="tab-nav">
@@ -963,6 +981,18 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 
     const allPubs = {json.dumps(all_pubs)};
 
+    function showReloadOverlay() {{
+      const overlay = document.getElementById('page-loading');
+      if (overlay) overlay.style.display = 'flex';
+    }}
+
+    function setLikedAck(checked) {{
+      showReloadOverlay();
+      const url = new URL(window.location.href);
+      url.searchParams.set('liked_ack', checked ? '1' : '0');
+      window.location.href = url.toString();
+    }}
+
     function switchTab(tab) {{
       // Hide all tabs
       document.getElementById('tab-replies').style.display = 'none';
@@ -1010,6 +1040,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           _loadEs.close(); _loadEs = null;
           localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
           status.textContent = 'Done — reloading…';
+          showReloadOverlay();
           setTimeout(() => window.location.href = '/?tab=' + encodeURIComponent(pub), 1500);
           return;
         }}
@@ -1037,12 +1068,13 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
             status.textContent = 'Connection lost — sync still running in background…';
             var poll = setInterval(() => {{
               fetch('/sync/status').then(r => r.json()).then(d => {{
-                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; setTimeout(() => window.location.reload(), 1500); }}
+                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; showReloadOverlay(); setTimeout(() => window.location.reload(), 1500); }}
               }});
             }}, 5000);
           }} else {{
             btn.style.display = ''; stopBtn.style.display = 'none';
             status.textContent = 'Connection lost — reloading…';
+            showReloadOverlay();
             setTimeout(() => window.location.reload(), 2000);
           }}
         }}).catch(() => {{ btn.style.display = ''; stopBtn.style.display = 'none'; status.textContent = 'Connection lost.'; }});
@@ -1361,6 +1393,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           _es.close(); _es = null;
           localStorage.setItem('lastSyncLog', log.textContent);
           status.textContent = 'Done — reloading…';
+          showReloadOverlay();
           setTimeout(() => window.location.href = '/?tab=replies', 1500);
           return;
         }}
@@ -1385,6 +1418,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           }} else {{
             btn.style.display = ''; stopBtn.style.display = 'none';
             status.textContent = 'Connection lost — sync may have completed. Reloading…';
+            showReloadOverlay();
             setTimeout(() => window.location.reload(), 2000);
           }}
         }}).catch(() => {{
@@ -1400,6 +1434,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
               _pollUntilDone();
             }} else {{
               status.textContent = 'Sync complete — reloading…';
+              showReloadOverlay();
               setTimeout(() => window.location.reload(), 1500);
             }}
           }}).catch(() => _pollUntilDone());
@@ -1433,6 +1468,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
           _postsEs.close(); _postsEs = null;
           localStorage.setItem('lastPostsSyncLog_' + pub, log.textContent);
           status.textContent = 'Done — reloading…';
+          showReloadOverlay();
           setTimeout(() => window.location.href = '/?tab=' + encodeURIComponent(pub), 1500);
           return;
         }}
@@ -1460,12 +1496,13 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
             status.textContent = 'Connection lost — sync still running in background…';
             var poll = setInterval(() => {{
               fetch('/sync/status').then(r => r.json()).then(d => {{
-                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; setTimeout(() => window.location.reload(), 1500); }}
+                if (!d.running) {{ clearInterval(poll); status.textContent = 'Done — reloading…'; showReloadOverlay(); setTimeout(() => window.location.reload(), 1500); }}
               }});
             }}, 5000);
           }} else {{
             btn.style.display = ''; stopBtn.style.display = 'none';
             status.textContent = 'Connection lost — reloading…';
+            showReloadOverlay();
             setTimeout(() => window.location.reload(), 2000);
           }}
         }}).catch(() => {{ btn.style.display = ''; stopBtn.style.display = 'none'; status.textContent = 'Connection lost.'; }});
