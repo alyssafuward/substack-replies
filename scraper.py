@@ -765,23 +765,44 @@ def load_posts_to_target(conn, pub_subdomain, target=25):
 
 def refresh_post_comments(conn, pub_subdomain):
     """
-    Re-fetch comments for all loaded posts in a publication.
-    Updates existing comment records with fresh data (picks up new reactions/replies).
+    Smart sync: fetch fresh comment counts for all posts, then only re-fetch
+    comments for posts where the count has changed since last sync.
     """
-    posts = conn.execute("""
-        SELECT id, title, canonical_url FROM posts
+    loaded = conn.execute("""
+        SELECT id, title, canonical_url, comment_count FROM posts
         WHERE pub_subdomain=? ORDER BY post_date DESC
     """, (pub_subdomain,)).fetchall()
 
-    if not posts:
+    if not loaded:
         print(f"{ts()} No posts loaded for {pub_subdomain}.")
         return
 
-    print(f"{ts()} Refreshing {len(posts)} posts in {pub_subdomain}...")
-    for post_id, post_title, post_url in posts:
+    stored_counts = {row[0]: (row[1], row[2], row[3]) for row in loaded}
+
+    # Fetch fresh post list to get current comment counts (a few paginated calls)
+    print(f"{ts()} Checking comment counts for {len(loaded)} posts in {pub_subdomain}...")
+    fresh_posts = fetch_all_posts(pub_subdomain)
+    fresh_counts = {p["id"]: p.get("comment_count", 0) for p in fresh_posts}
+
+    changed = []
+    for post_id, (post_title, post_url, stored_count) in stored_counts.items():
+        fresh_count = fresh_counts.get(post_id)
+        if fresh_count is None:
+            continue  # post no longer in API (deleted/draft)
+        if fresh_count != stored_count:
+            changed.append((post_id, post_title, post_url, stored_count, fresh_count))
+
+    if not changed:
+        print(f"{ts()} All up to date — no comment count changes detected.")
+        return
+
+    print(f"{ts()} {len(changed)} post(s) have new activity — refreshing comments...")
+    for post_id, post_title, post_url, old_count, new_count in changed:
         try:
             comments = fetch_post_comments(pub_subdomain, post_id)
             flat = flatten_comments(comments)
+
+            new_from_others = 0
             for c in flat:
                 existing = conn.execute("SELECT id FROM comments WHERE id=?", (c["id"],)).fetchone()
                 if existing:
@@ -790,13 +811,22 @@ def refresh_post_comments(conn, pub_subdomain):
                 else:
                     _store_comment(conn, c, pub_subdomain=pub_subdomain, post_id=post_id,
                                    post_title=post_title, post_url=post_url)
+                    if c.get("user_id") != USER_ID:
+                        new_from_others += 1
+
+            if new_from_others:
+                print(f"{ts()}   \"{post_title or post_id}\": {new_from_others} new comment(s) from others")
+            else:
+                print(f"{ts()}   \"{post_title or post_id}\": count changed (your own reply or edit) — nothing new to respond to")
+
+            # Update stored comment count
+            conn.execute("UPDATE posts SET comment_count=? WHERE id=?", (new_count, post_id))
             conn.commit()
-            print(f"{ts()}   \"{post_title or post_id}\": {len(flat)} comments")
             time.sleep(0.5)
         except Exception as e:
             print(f"{ts()}   warning: couldn't refresh post {post_id}: {e}")
 
-    print(f"{ts()} Post refresh complete.")
+    print(f"{ts()} Sync complete.")
 
 
 # ── Report ────────────────────────────────────────────────────────────────────
