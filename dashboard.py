@@ -847,19 +847,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
     .toggle-btn:hover {{ color: #666; }}
     .intro {{ max-width: 720px; margin: 0 auto 16px; font-size: 0.88rem; color: #666; line-height: 1.5; }}
-    .how-it-works-toggle {{
-      background: none; border: none; cursor: pointer;
-      font-size: 0.8rem; color: #bbb; padding: 0; margin-top: 6px;
-      display: block; text-decoration: underline; text-underline-offset: 2px;
+    .how-it-works-link {{
+      font-size: 0.8rem; color: #bbb; margin-top: 6px;
+      display: block; text-underline-offset: 2px;
     }}
-    .how-it-works-toggle:hover {{ color: #888; }}
-    .how-it-works {{
-      display: none; margin-top: 12px; padding: 14px 16px;
-      background: white; border-radius: 8px; border: 1px solid #e5e5e5;
-      font-size: 0.84rem; color: #555; line-height: 1.6;
-    }}
-    .how-it-works h3 {{ font-size: 0.78rem; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 4px; }}
-    .how-it-works h3:first-child {{ margin-top: 0; }}
+    .how-it-works-link:hover {{ color: #888; }}
     .liked-section {{ display: none; margin-top: 10px; }}
     .liked-section .card {{ opacity: 0.55; background: #fafafa; }}
     .liked-section .card:hover {{ opacity: 0.8; }}
@@ -891,25 +883,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   <div class="header">
     <h1>Substack Replies</h1>
     <div class="tagline">Stay on top of replies across your Substack notes, comments, and posts.</div>
-    <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
-    <div class="how-it-works" id="how-it-works">
-      <h3>Replies tab</h3>
-      Replies to your Substack Notes, and replies to comments you've left on other people's posts and Notes. Shows what still needs a response. Use <strong>Sync</strong> to pull in new activity. You can set how many new replies to fetch at a time — the app rechecks your existing unresponded items first, then pulls in the most recent new replies up to your limit, then fills in older history if there's still room.
-      <h3>Publication tabs</h3>
-      One tab per publication you own. Shows comments on your own posts. Use <strong>Load posts</strong> to pull in posts and their comments for the first time; use <strong>Sync</strong> to check for new activity — only posts where the comment count changed are re-fetched.
-      <h3>Search</h3>
-      Filter by name, keyword, or phrase across all tabs simultaneously. Match counts appear in each tab label.
-      <h3>Liked toggle</h3>
-      If you ❤️ a reply on Substack, the app can treat that as "seen and acknowledged" and move it to a collapsed section on both tabs. Use the toggle below the search bar to turn this off — liked items will stay in the main queue until you respond or archive them.
-      <h3>Archive</h3>
-      Dismiss a reply without responding to it. Useful for spam, drive-bys, or things you've read but don't want cluttering your queue. Available on the Replies tab only; Publications comments can't be archived yet.
-      <h3>Co-authored &amp; guest posts</h3>
-      Replies from posts you've written for other publications show up in a separate collapsed section in the Replies tab, since they need a different kind of attention.
-      <h3>Responded</h3>
-      Once you've replied to something, it moves to a collapsed Responded section so you can focus on what's still open.
-      <h3>Your data</h3>
-      Everything lives in a local SQLite database — no cloud sync, no sharing. Data persists across page refreshes.
-    </div>
+    <a class="how-it-works-link" href="/how-it-works" target="_blank" rel="noopener">How it works ↗</a>
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
       <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
@@ -1124,13 +1098,6 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const open = older.style.display === 'block';
       older.style.display = open ? 'none' : 'block';
       btn.textContent = open ? btn.textContent.replace('▲', '▶') : btn.textContent.replace('▶', '▲');
-    }}
-
-    function toggleHowItWorks(btn) {{
-      const el = document.getElementById('how-it-works');
-      const open = el.style.display === 'block';
-      el.style.display = open ? 'none' : 'block';
-      btn.textContent = open ? 'How it works ▾' : 'How it works ▴';
     }}
 
     function toggleGuest(btn) {{
