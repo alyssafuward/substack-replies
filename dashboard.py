@@ -667,14 +667,18 @@ def render_post_comments_tab(posts_data, pub_subdomain):
   {empty_html}"""
 
 
-def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None):
+def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None, liked_acknowledged=True):
     all_posts_data = all_posts_data or {}
     all_pubs = all_pubs or []
     responded_items = responded_items or []
     archived_items = archived_items or []
 
-    needs_response = [i for i in items if not i.get("liked") and i.get("source") != "own_pub"]
-    reviewed = [i for i in items if i.get("liked") and i.get("source") != "own_pub"]
+    if liked_acknowledged:
+        needs_response = [i for i in items if not i.get("liked") and i.get("source") != "own_pub"]
+        reviewed = [i for i in items if i.get("liked") and i.get("source") != "own_pub"]
+    else:
+        needs_response = [i for i in items if i.get("source") != "own_pub"]
+        reviewed = []
 
     direct_items = [i for i in needs_response if not i.get("guest_post") and i.get("source") != "own_pub"]
     guest_items = [i for i in needs_response if i.get("guest_post") and i.get("source") != "own_pub"]
@@ -913,6 +917,14 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <input type="text" id="global-search" placeholder="Search across all tabs…" oninput="globalSearch(this.value)"
            style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
   </div>
+  <div style="max-width:720px; margin:0 auto 10px; font-size:0.82rem; color:#666;">
+    <label style="cursor:pointer; user-select:none;">
+      <input type="checkbox" id="liked-ack-toggle" {"checked" if liked_acknowledged else ""}
+             onchange="setLikedAck(this.checked)"
+             style="margin-right:5px; cursor:pointer;">
+      Treat ❤ likes as acknowledged (move to collapsed section instead of requiring archive)
+    </label>
+  </div>
 
   <div class="tab-nav">
     <button class="tab-btn" id="tab-btn-replies" data-label="Replies" onclick="switchTab('replies')">Replies</button>
@@ -962,6 +974,12 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     const initTab = "{active_tab}";
 
     const allPubs = {json.dumps(all_pubs)};
+
+    function setLikedAck(checked) {{
+      const url = new URL(window.location.href);
+      url.searchParams.set('liked_ack', checked ? '1' : '0');
+      window.location.href = url.toString();
+    }}
 
     function switchTab(tab) {{
       // Hide all tabs
