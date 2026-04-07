@@ -125,6 +125,9 @@ def init_db(conn):
         );
     """)
 
+    # WAL mode: allows concurrent reads and writes between Flask and the scraper subprocess
+    conn.execute("PRAGMA journal_mode=WAL")
+
     # Migrate existing DB: add is_responded if it doesn't exist yet
     try:
         conn.execute("ALTER TABLE activity_items ADD COLUMN is_responded INTEGER DEFAULT 0")
@@ -1017,7 +1020,7 @@ def main():
         print("Usage: python scraper.py [sync] [report] [load-post --pub X] [sync-posts --pub X] [--as-of YYYY-MM-DD]")
         sys.exit(0)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         init_db(conn)
 
         if "load-posts" in args:

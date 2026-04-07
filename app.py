@@ -169,7 +169,7 @@ def archive():
     comment_id = request.json.get("comment_id")
     if not comment_id:
         return jsonify({"error": "missing comment_id"}), 400
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.execute(
             "UPDATE activity_items SET is_archived = 1 WHERE comment_id = ?",
             (comment_id,)
@@ -182,7 +182,7 @@ def unarchive():
     comment_id = request.json.get("comment_id")
     if not comment_id:
         return jsonify({"error": "missing comment_id"}), 400
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.execute(
             "UPDATE activity_items SET is_archived = 0 WHERE comment_id = ?",
             (comment_id,)
@@ -196,7 +196,7 @@ def insights():
         from flask import redirect
         return redirect("/")
     query = request.args.get("q", "").strip()
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         data = load_insights(conn)
         search_results = search_commenter(conn, query) if query else None
     html = render_insights_html(data, query=query or None, search_results=search_results)
@@ -213,7 +213,7 @@ def index():
     active_tab = request.args.get("tab", "replies")
     liked_ack = request.args.get("liked_ack", "1") != "0"
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         items = load_data(conn)
         stats = load_stats(conn)
         all_posts_data = {pub: load_post_comments_data(conn, pub) for pub in all_pubs}
