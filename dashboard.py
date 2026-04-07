@@ -719,7 +719,8 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
     .header {{ max-width: 720px; margin: 0 auto 16px; }}
     h1 {{ font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }}
-    .subtitle {{ color: #666; font-size: 0.9rem; }}
+    .tagline {{ font-size: 1.05rem; color: #444; margin-top: 6px; margin-bottom: 4px; }}
+    .subtitle {{ color: #aaa; font-size: 0.78rem; margin-top: 8px; }}
     .stats {{ display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }}
     .stat {{
       background: white; border-radius: 8px; padding: 8px 14px;
@@ -887,16 +888,16 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 <body>
   <div class="header">
     <h1>Substack Replies</h1>
-    <div class="subtitle">Synced up to {stats['synced_up_to']}</div>
+    <div class="tagline">Stay on top of replies across your Substack notes, comments, and posts.</div>
     <div class="stats">
       <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
       <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
     </div>
+    <div class="subtitle">Synced up to {stats['synced_up_to']}</div>
     {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
   </div>
 
   <div class="intro">
-    Stay on top of replies across your Substack notes, comments, and posts.
     <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
     <div class="how-it-works" id="how-it-works">
       <h3>Replies tab</h3>
