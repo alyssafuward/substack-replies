@@ -894,15 +894,19 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <button class="how-it-works-toggle" onclick="toggleHowItWorks(this)">How it works ▾</button>
     <div class="how-it-works" id="how-it-works">
       <h3>Replies tab</h3>
-      Shows replies to your notes and comments across Substack. Sync to pull in new activity. Items that need a response appear in the main queue.
+      Replies to your Substack Notes, and replies to comments you've left on other people's posts and Notes. Shows what still needs a response. Use <strong>Sync</strong> to pull in new activity. You can set how many new replies to fetch at a time — the app rechecks your existing unresponded items first, then pulls in the most recent new replies up to your limit, then fills in older history if there's still room.
       <h3>Publication tabs</h3>
-      Shows comments on your own posts that haven't been answered. Click <strong>Load posts</strong> to fetch posts (newest first). Click <strong>Sync</strong> to check already-loaded posts for new comments — only posts where the comment count changed are re-fetched.
-      <h3>Responded</h3>
-      Once you've replied to something, it moves to the collapsed Responded section so you can focus on what's still open.
-      <h3>Liked</h3>
-      Liking a reply on Substack marks it as acknowledged and moves it to a collapsed section on both the Replies and Publications tabs. Use the toggle below the search bar to turn this off — liked items will stay in the main queue until you respond or archive them. Note: archive is available on the Replies tab only; Publications comments can't be archived yet.
+      One tab per publication you own. Shows comments on your own posts. Use <strong>Load posts</strong> to pull in posts and their comments for the first time; use <strong>Sync</strong> to check for new activity — only posts where the comment count changed are re-fetched.
       <h3>Search</h3>
-      Search by name, keyword, or phrase — filters across all tabs simultaneously. Match counts appear in each tab label.
+      Filter by name, keyword, or phrase across all tabs simultaneously. Match counts appear in each tab label.
+      <h3>Liked toggle</h3>
+      If you ❤️ a reply on Substack, the app can treat that as "seen and acknowledged" and move it to a collapsed section on both tabs. Use the toggle below the search bar to turn this off — liked items will stay in the main queue until you respond or archive them.
+      <h3>Archive</h3>
+      Dismiss a reply without responding to it. Useful for spam, drive-bys, or things you've read but don't want cluttering your queue. Available on the Replies tab only; Publications comments can't be archived yet.
+      <h3>Co-authored &amp; guest posts</h3>
+      Replies from posts you've written for other publications show up in a separate collapsed section in the Replies tab, since they need a different kind of attention.
+      <h3>Responded</h3>
+      Once you've replied to something, it moves to a collapsed Responded section so you can focus on what's still open.
       <h3>Your data</h3>
       Everything lives in a local SQLite database — no cloud sync, no sharing. Data persists across page refreshes.
     </div>
