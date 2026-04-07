@@ -26,8 +26,20 @@
       color: #aaa;
       text-decoration: none;
       margin-bottom: 32px;
+      cursor: pointer;
     }
     .back:hover { color: #666; }
+
+    .app-hint {
+      display: none;
+      margin-top: 8px;
+      font-size: 0.82rem;
+      color: #666;
+      background: white;
+      border: 1px solid #e5e5e5;
+      border-radius: 6px;
+      padding: 8px 12px;
+    }
 
     h1 {
       font-size: 1.7rem;
@@ -38,7 +50,7 @@
     .tagline {
       font-size: 0.95rem;
       color: #666;
-      margin-bottom: 32px;
+      margin-bottom: 20px;
     }
 
     .note {
@@ -50,6 +62,10 @@
       color: #777;
       margin-bottom: 36px;
       line-height: 1.5;
+    }
+
+    .note + .note {
+      margin-top: -24px;
     }
 
     .section {
@@ -69,12 +85,6 @@
       margin-bottom: 6px;
     }
 
-    .section-title {
-      font-size: 1rem;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }
-
     .section p {
       font-size: 0.88rem;
       color: #555;
@@ -91,29 +101,13 @@
       margin: 36px 0;
     }
 
-    .cta {
-      text-align: center;
-      padding: 8px 0;
+    .bottom-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
     }
-
-    .cta p {
-      font-size: 0.88rem;
-      color: #666;
-      margin-bottom: 14px;
-    }
-
-    .cta a {
-      display: inline-block;
-      background: #ff3300;
-      color: white;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 0.9rem;
-      padding: 10px 24px;
-      border-radius: 7px;
-    }
-
-    .cta a:hover { background: #e02d00; }
 
     .footer {
       margin-top: 48px;
@@ -124,18 +118,34 @@
 
     .footer a { color: #bbb; }
     .footer a:hover { color: #888; }
+
+    .new-here {
+      font-size: 0.82rem;
+      color: #aaa;
+    }
+    .new-here a { color: #aaa; }
+    .new-here a:hover { color: #666; }
   </style>
 </head>
 <body>
   <div class="container">
 
-    <a class="back" href="https://github.com/alyssafuward/substack-replies">← Back to repo</a>
+    <a class="back" id="back-top" onclick="goBack(this)">← Back to app</a>
+    <div class="app-hint" id="hint-top">
+      The app runs locally. Open <a href="http://localhost:5001">http://localhost:5001</a> in your browser.
+    </div>
+
+    <br>
 
     <h1>Substack Replies</h1>
     <p class="tagline">A personal tool for Substack writers who want one place to see what still needs a response — across notes, comments, and your own posts.</p>
 
     <div class="note">
       This is not a managed service. It runs locally on your computer, stores your data in a local database, and talks to Substack directly using your own session. Nothing is hosted anywhere.
+    </div>
+
+    <div class="note">
+      <strong>Note on the API:</strong> This uses Substack's internal API, which is unofficial, undocumented, and intended for personal use only. It works as of writing but could break if Substack changes things. The API is rate-limited — if you hit the limit, the app will stop and ask you to try again in a few minutes.
     </div>
 
     <div class="section">
@@ -181,9 +191,12 @@
 
     <hr>
 
-    <div class="cta">
-      <p>Ready to set it up?</p>
-      <a href="https://github.com/alyssafuward/substack-replies#getting-started">Get started →</a>
+    <div class="bottom-nav">
+      <a class="back" id="back-bottom" onclick="goBack(this)">← Back to app</a>
+      <div class="new-here">New here? <a href="https://github.com/alyssafuward/substack-replies#getting-started">Get started →</a></div>
+    </div>
+    <div class="app-hint" id="hint-bottom" style="margin-top:8px;">
+      The app runs locally. Open <a href="http://localhost:5001">http://localhost:5001</a> in your browser.
     </div>
 
     <div class="footer">
@@ -191,5 +204,16 @@
     </div>
 
   </div>
+
+  <script>
+    function goBack(el) {
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        window.location.href = '/';
+      } else {
+        var hintId = el.id === 'back-top' ? 'hint-top' : 'hint-bottom';
+        document.getElementById(hintId).style.display = 'block';
+      }
+    }
+  </script>
 </body>
 </html>
