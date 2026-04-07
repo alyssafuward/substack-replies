@@ -9,7 +9,7 @@
 ## How to run
 
 ```
-flask run --port 5001
+python app.py
 ```
 
 ## Key files
