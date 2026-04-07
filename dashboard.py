@@ -223,6 +223,14 @@ def load_responded_data(conn):
         your_body = your_row[0] if your_row else ""
         label = "replied to your note" if item_type == "note_reply" else "replied to your comment"
 
+        # Find your reply back to this person
+        reply_back_row = conn.execute("""
+            SELECT body FROM comments
+            WHERE user_id = ? AND ancestor_path LIKE ? AND id > ?
+            ORDER BY id LIMIT 1
+        """, (USER_ID, f"%{reply_id}%", reply_id)).fetchone()
+        your_reply_back = reply_back_row[0] if reply_back_row else ""
+
         if item_type == "note_reply" and reply_handle:
             link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
         elif post_url:
@@ -243,6 +251,7 @@ def load_responded_data(conn):
             "label": label,
             "your_body": your_body,
             "their_body": reply_body,
+            "your_reply_back": your_reply_back,
             "link": link,
             "comment_id": reply_id,
             "liked": bool(reply_raw.get("reaction")),
@@ -386,14 +395,13 @@ def load_post_comments_data(conn, pub_subdomain):
 
         unanswered = []
         liked_list = []
+        responded_list = []
 
         for cid, name, handle, body, date, raw_json_str in comment_rows:
             your_reply = conn.execute("""
-                SELECT id FROM comments
+                SELECT id, body FROM comments
                 WHERE user_id=? AND (ancestor_path=? OR ancestor_path LIKE ?)
             """, (USER_ID, str(cid), f"%.{cid}%")).fetchone()
-            if your_reply:
-                continue
 
             raw = json.loads(raw_json_str or "{}")
             is_liked = bool(raw.get("reaction"))
@@ -408,6 +416,12 @@ def load_post_comments_data(conn, pub_subdomain):
                 "link": link,
                 "liked": is_liked,
             }
+
+            if your_reply:
+                c["your_reply"] = your_reply[1] or ""
+                responded_list.append(c)
+                continue
+
             if is_liked:
                 liked_list.append(c)
             else:
@@ -420,6 +434,7 @@ def load_post_comments_data(conn, pub_subdomain):
             "post_date": (post_date or "")[:10],
             "unanswered": unanswered,
             "liked": liked_list,
+            "responded": responded_list,
         })
 
     return result
@@ -491,7 +506,14 @@ def render_card(item, section="action"):
     who = escape(item["who"])
     label = escape(item["label"])
     your = escape(item["your_body"][:120] + ("..." if len(item["your_body"]) > 120 else ""))
-    theirs = escape(item["their_body"][:200] + ("..." if len(item["their_body"]) > 200 else ""))
+    LIMIT = 200
+    their_body = item["their_body"]
+    if len(their_body) <= LIMIT:
+        theirs_html = escape(their_body)
+    else:
+        short = escape(their_body[:LIMIT])
+        full = escape(their_body)
+        theirs_html = f'<span class="thread-short">{short}<button class="thread-more" onclick="expandThread(this)">… more</button></span><span class="thread-full" style="display:none">{full}<button class="thread-more" onclick="collapseThread(this)"> less</button></span>'
     link = item["link"]
     liked = item.get("liked", False)
     cid = item["comment_id"]
@@ -512,6 +534,12 @@ def render_card(item, section="action"):
         archive_btn = ""
     thread_html = render_thread(thread)
 
+    your_reply_back = item.get("your_reply_back", "")
+    reply_back_html = ""
+    if your_reply_back:
+        reply_back_esc = escape(your_reply_back[:200] + ("..." if len(your_reply_back) > 200 else ""))
+        reply_back_html = f'<div class="your-reply-preview">↩ {reply_back_esc}</div>'
+
     who_key = escape((item["who"] + " " + item.get("handle", "")).strip().lower())
     return f"""
     <div class="card" data-id="{cid}" data-section="{section}" data-who="{who_key}">
@@ -529,19 +557,32 @@ def render_card(item, section="action"):
       <div class="who">{who_html} <span class="label">{label}</span></div>
       {"<div class='your-content'><span class='field-label'>" + your_label + "</span> " + your + "</div>" if your and not thread_html else ""}
       {thread_html}
-      <div class="their-content"><span class="field-label">Their reply:</span> {theirs}</div>
+      <div class="their-content"><span class="field-label">Their reply:</span> {theirs_html}</div>
+      {reply_back_html}
     </div>
     """
 
 def render_post_comment_card(c):
     who = escape(c["who"])
     date = escape(format_date(c.get("raw_date", c["date"])))
-    body = escape(c["body"][:200] + ("..." if len(c["body"]) > 200 else ""))
+    LIMIT = 200
+    raw_body = c["body"]
+    if len(raw_body) <= LIMIT:
+        body_html = escape(raw_body)
+    else:
+        short = escape(raw_body[:LIMIT])
+        full = escape(raw_body)
+        body_html = f'<span class="thread-short">{short}<button class="thread-more" onclick="expandThread(this)">… more</button></span><span class="thread-full" style="display:none">{full}<button class="thread-more" onclick="collapseThread(this)"> less</button></span>'
     link = c.get("link", "")
     liked = c.get("liked", False)
+    your_reply = c.get("your_reply", "")
 
     liked_badge = '<span class="liked-badge">❤️ liked</span>' if liked else ""
     link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open →</a>' if link else ""
+    reply_html = ""
+    if your_reply:
+        reply_esc = escape(your_reply[:200] + ("..." if len(your_reply) > 200 else ""))
+        reply_html = f'<div class="your-reply-preview">↩ {reply_esc}</div>'
 
     return f"""    <div class="post-comment-card">
       <div class="card-header">
@@ -549,7 +590,7 @@ def render_post_comment_card(c):
         <div class="card-actions">{link_html}</div>
       </div>
       <div class="who">{who}</div>
-      <div class="their-content">{body}</div>
+      <div class="their-content">{body_html}</div>{reply_html}
     </div>"""
 
 
@@ -559,11 +600,12 @@ def render_post_section(post):
     post_date = escape(post["post_date"])
     unanswered = post["unanswered"]
     liked = post["liked"]
+    responded = post.get("responded", [])
 
     title_link = f'<a href="{escape(url)}" target="_blank">{title}</a>' if url else title
     header = f'<div class="post-header"><span class="post-title">{title_link}</span><span class="post-date">{post_date}</span></div>'
 
-    if not unanswered and not liked:
+    if not unanswered and not liked and not responded:
         body = '<div class="post-empty">No unanswered comments</div>'
     else:
         body = "\n".join(render_post_comment_card(c) for c in unanswered)
@@ -573,6 +615,13 @@ def render_post_section(post):
       <div class="toggle-section" style="margin-top:8px;">
         <button class="toggle-btn" onclick="toggleSection(this)">▶ Show liked comments ({len(liked)})</button>
         <div class="liked-section" style="display:none;">{liked_html}</div>
+      </div>"""
+        if responded:
+            responded_html = "\n".join(render_post_comment_card(c) for c in responded)
+            body += f"""
+      <div class="toggle-section" style="margin-top:8px;">
+        <button class="toggle-btn" onclick="toggleSection(this)">▶ Responded ({len(responded)})</button>
+        <div class="liked-section" style="display:none;">{responded_html}</div>
       </div>"""
 
     return f'<div class="post-section">{header}{body}</div>'
@@ -644,7 +693,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     empty_msg = "" if count else '<div class="empty">🎉 All caught up!</div>'
 
     pub_tabs_html = "\n".join(
-        f'<button class="tab-btn" id="tab-btn-{escape(p)}" onclick="switchTab(\'{escape(p)}\')">{escape(p)}</button>'
+        f'<button class="tab-btn" id="tab-btn-{escape(p)}" data-label="{escape(p)}" onclick="switchTab(\'{escape(p)}\')">{escape(p)}</button>'
         for p in all_pubs
     )
     pub_contents_html = "\n".join(
@@ -825,6 +874,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       padding: 10px 0; border-bottom: 1px solid #f5f5f5;
     }}
     .post-comment-card:last-child {{ border-bottom: none; }}
+    .your-reply-preview {{ margin-top: 5px; font-size: 0.82rem; color: #888; font-style: italic; }}
     .posts-controls {{ max-width: 720px; margin: 0 auto 20px; }}
     a {{ color: #bbb; }}
   </style>
@@ -859,17 +909,18 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     A sync is already in progress. Please wait for it to finish before starting another.
   </div>
 
+  <div style="max-width:720px; margin:0 auto 10px;">
+    <input type="text" id="global-search" placeholder="Search across all tabs…" oninput="globalSearch(this.value)"
+           style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+  </div>
+
   <div class="tab-nav">
-    <button class="tab-btn" id="tab-btn-replies" onclick="switchTab('replies')">Replies</button>
+    <button class="tab-btn" id="tab-btn-replies" data-label="Replies" onclick="switchTab('replies')">Replies</button>
     {pub_tabs_html}
   </div>
 
   <div id="tab-replies">
     <div style="max-width:720px; margin:0 auto;">
-      <div style="margin-bottom:14px;">
-        <input type="text" id="commenter-search" placeholder="Filter by name or @handle…" oninput="filterByName(this.value)"
-               style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
-      </div>
       <div class="sync-row">
         <label style="font-size:0.82rem; color:#666;">New replies to sync:</label>
         <select id="sync-count" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
@@ -1016,14 +1067,14 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
 
     function expandThread(btn) {{
-      const msg = btn.closest('.thread-msg');
-      msg.querySelector('.thread-short').style.display = 'none';
-      msg.querySelector('.thread-full').style.display = '';
+      const container = btn.closest('.thread-msg') || btn.parentElement.parentElement;
+      container.querySelector('.thread-short').style.display = 'none';
+      container.querySelector('.thread-full').style.display = '';
     }}
     function collapseThread(btn) {{
-      const msg = btn.closest('.thread-msg');
-      msg.querySelector('.thread-short').style.display = '';
-      msg.querySelector('.thread-full').style.display = 'none';
+      const container = btn.closest('.thread-msg') || btn.parentElement.parentElement;
+      container.querySelector('.thread-short').style.display = '';
+      container.querySelector('.thread-full').style.display = 'none';
     }}
     function toggleThread(btn) {{
       const older = btn.nextElementSibling;
@@ -1133,72 +1184,109 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }});
     }}
 
-    function filterByName(q) {{
+    function cardMatches(card, q) {{
+      if (!q) return true;
+      const who = (card.dataset.who || (card.querySelector('.who') || {{}}).textContent || '').toLowerCase();
+      const body = ((card.querySelector('.their-content') || {{}}).textContent || '').toLowerCase();
+      return who.includes(q) || body.includes(q);
+    }}
+
+    function setTabLabel(tabId, count) {{
+      const btn = document.getElementById('tab-btn-' + tabId);
+      if (!btn) return;
+      const base = btn.dataset.label || tabId;
+      btn.textContent = (count !== null) ? base + ' (' + count + ')' : base;
+    }}
+
+    function globalSearch(q) {{
       q = q.toLowerCase().trim();
 
-      // Helper: filter cards in a container, return visible count
-      function filterCards(containerId, q) {{
-        const cards = document.querySelectorAll('#' + containerId + ' .card');
-        let visible = 0;
-        cards.forEach(card => {{
-          const who = (card.dataset.who || '').toLowerCase();
-          const show = !q || who.includes(q);
-          card.style.display = show ? '' : 'none';
-          if (show) visible++;
-        }});
-        return visible;
-      }}
+      // ── Replies tab ──
+      let repliesTotal = 0;
 
-      // Unanswered — also clear show-more hiding when filtering
+      // Action cards
       const actionCards = document.querySelectorAll('#action-cards .card');
       let visibleAction = 0;
       actionCards.forEach(card => {{
-        const who = (card.dataset.who || '').toLowerCase();
-        const show = !q || who.includes(q);
+        const show = cardMatches(card, q);
         card.style.display = show ? '' : 'none';
-        if (show) visibleAction++;
+        if (show && !card.classList.contains('hidden-card')) visibleAction++;
+        if (show) repliesTotal++;
       }});
-      // Remove show-more button when filtering
       const showMoreWrap = document.getElementById('show-more-btn');
       if (showMoreWrap) showMoreWrap.closest('.toggle-section').style.display = q ? 'none' : '';
       const remaining = document.getElementById('remaining');
       if (remaining) remaining.textContent = visibleAction;
 
-      // Guest / co-authored
-      const visibleGuest = filterCards('guest-cards', q);
-      const guestCount = document.getElementById('guest-count');
-      if (guestCount) guestCount.textContent = visibleGuest;
-      const guestWrap = document.getElementById('guest-toggle-wrap');
-      if (guestWrap) {{
-        guestWrap.style.display = (!q || visibleGuest > 0) ? '' : 'none';
-      }}
+      // Replies toggle sections (guest, liked, responded, archived)
+      [
+        ['guest-cards', 'guest-count', 'guest-toggle-wrap'],
+        ['liked-cards', 'liked-count', 'liked-toggle-wrap'],
+        ['responded-cards', 'responded-count', 'responded-toggle-wrap'],
+        ['archived-cards', 'archived-count', 'archived-toggle-wrap'],
+      ].forEach(([cardsId, countId, wrapId]) => {{
+        const cards = document.querySelectorAll('#' + cardsId + ' .card');
+        let visible = 0;
+        cards.forEach(card => {{
+          const show = cardMatches(card, q);
+          card.style.display = show ? '' : 'none';
+          if (show) {{ visible++; repliesTotal++; }}
+        }});
+        const countEl = document.getElementById(countId);
+        if (countEl) countEl.textContent = visible;
+        const wrapEl = document.getElementById(wrapId);
+        if (wrapEl) wrapEl.style.display = (!q || visible > 0) ? '' : 'none';
+      }});
 
-      // Liked
-      const visibleLiked = filterCards('liked-cards', q);
-      const likedCount = document.getElementById('liked-count');
-      if (likedCount) likedCount.textContent = visibleLiked;
-      const likedWrap = document.getElementById('liked-toggle-wrap');
-      if (likedWrap) {{
-        likedWrap.style.display = (!q || visibleLiked > 0) ? '' : 'none';
-      }}
+      setTabLabel('replies', q ? repliesTotal : null);
 
-      // Responded
-      const visibleResponded = filterCards('responded-cards', q);
-      const respondedCount = document.getElementById('responded-count');
-      if (respondedCount) respondedCount.textContent = visibleResponded;
-      const respondedWrap = document.getElementById('responded-toggle-wrap');
-      if (respondedWrap) {{
-        respondedWrap.style.display = (!q || visibleResponded > 0) ? '' : 'none';
-      }}
+      // ── Pub tabs ──
+      allPubs.forEach(pub => {{
+        let pubTotal = 0;
+        const tabContent = document.getElementById('tab-content-' + pub);
+        if (!tabContent) return;
 
-      // Archived
-      const visibleArchived = filterCards('archived-cards', q);
-      const archivedCount = document.getElementById('archived-count');
-      if (archivedCount) archivedCount.textContent = visibleArchived;
-      const archivedWrap = document.getElementById('archived-toggle-wrap');
-      if (archivedWrap) {{
-        archivedWrap.style.display = (!q || visibleArchived > 0) ? '' : 'none';
-      }}
+        tabContent.querySelectorAll('.post-section').forEach(section => {{
+          let sectionCount = 0;
+
+          // Filter direct (unanswered) cards
+          section.querySelectorAll(':scope > .post-comment-card').forEach(card => {{
+            const show = cardMatches(card, q);
+            card.style.display = show ? '' : 'none';
+            if (show) sectionCount++;
+          }});
+
+          // Handle toggle sections (liked, responded) within this post-section
+          section.querySelectorAll('.toggle-section').forEach(toggleSec => {{
+            const innerCards = toggleSec.querySelectorAll('.post-comment-card');
+            let innerVisible = 0;
+            innerCards.forEach(card => {{
+              const show = cardMatches(card, q);
+              card.style.display = show ? '' : 'none';
+              if (show) {{ innerVisible++; sectionCount++; }}
+            }});
+            if (q && innerVisible > 0) {{
+              // Auto-open this toggle section so matches are visible
+              const inner = toggleSec.querySelector('.liked-section');
+              if (inner) inner.style.display = 'block';
+              const btn = toggleSec.querySelector('.toggle-btn');
+              if (btn) btn.innerHTML = btn.innerHTML.replace('▶', '▼');
+            }} else if (!q) {{
+              // Restore collapsed
+              const inner = toggleSec.querySelector('.liked-section');
+              if (inner) inner.style.display = 'none';
+              const btn = toggleSec.querySelector('.toggle-btn');
+              if (btn) btn.innerHTML = btn.innerHTML.replace('▼', '▶');
+            }}
+            toggleSec.style.display = (!q || innerVisible > 0) ? '' : 'none';
+          }});
+
+          section.style.display = (!q || sectionCount > 0) ? '' : 'none';
+          pubTotal += sectionCount;
+        }});
+
+        setTabLabel(pub, q ? pubTotal : null);
+      }});
     }}
 
     (function initShowMore() {{
