@@ -266,7 +266,7 @@ def recheck_unresponded(conn):
         WHERE a.is_responded = 0
           AND a.type = 'comment_reply'
           AND a.comment_id IS NOT NULL
-          AND a.is_archived = 0
+          AND (a.is_archived IS NULL OR a.is_archived = 0)
           AND json_extract(c.raw_json, '$.reaction') IS NULL  -- liked = acknowledged, skip recheck
           AND NOT EXISTS (
               SELECT 1 FROM comments r
@@ -281,7 +281,7 @@ def recheck_unresponded(conn):
         return 0
 
     # Group items by (subdomain, post_id) to fetch each post's comments only once
-    groups = {}  # (subdomain, post_id) -> [(item_id, comment_id), ...]
+    groups = {}  # (subdomain, post_id) -> [(item_id, comment_id, is_guest), ...]
     skip_count = 0
 
     for item_id, comment_id, post_id in rows:
@@ -302,12 +302,14 @@ def recheck_unresponded(conn):
             continue
 
         subdomain = host.replace(".substack.com", "")
+        is_guest = not any(f"{sub}.substack.com" in post_url for sub in OWN_PUBS)
         key = (subdomain, post_id)
-        groups.setdefault(key, []).append((item_id, comment_id))
+        groups.setdefault(key, []).append((item_id, comment_id, is_guest))
 
     num_groups = len(groups)
     print(f"{ts()} Rechecking {len(rows)} comment replies across {num_groups} posts...")
     still_unresponded = skip_count
+    still_unresponded_guest = 0
     newly_responded = 0
 
     for gi, ((subdomain, post_id), items) in enumerate(groups.items(), 1):
@@ -315,7 +317,7 @@ def recheck_unresponded(conn):
             comments = fetch_post_comments(subdomain, post_id)
             print(f"{ts()}   [{gi}/{num_groups}] post {post_id} — {len(items)} comment(s)")
 
-            for item_id, comment_id in items:
+            for item_id, comment_id, is_guest in items:
                 # Refresh stored comment with fresh data (includes current reaction)
                 fresh = _find_comment(comments, comment_id)
                 if fresh:
@@ -332,7 +334,10 @@ def recheck_unresponded(conn):
                     newly_responded += 1
                     print(f"{ts()}     responded ✓")
                 else:
-                    still_unresponded += 1
+                    if is_guest:
+                        still_unresponded_guest += 1
+                    else:
+                        still_unresponded += 1
                     print(f"{ts()}     still unresponded")
 
         except Exception as e:
@@ -342,7 +347,8 @@ def recheck_unresponded(conn):
         time.sleep(1)
 
     conn.commit()
-    print(f"{ts()} Recheck done: {newly_responded} newly responded, {still_unresponded} still unresponded")
+    guest_note = f", {still_unresponded_guest} in guest/co-authored posts" if still_unresponded_guest else ""
+    print(f"{ts()} Recheck done: {newly_responded} newly responded, {still_unresponded} still unresponded{guest_note}")
     return still_unresponded
 
 # ── Sync: Activity Feed ───────────────────────────────────────────────────────
