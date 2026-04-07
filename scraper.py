@@ -268,9 +268,13 @@ def recheck_unresponded(conn):
           AND a.comment_id IS NOT NULL
           AND a.is_archived = 0
           AND json_extract(c.raw_json, '$.reaction') IS NULL  -- liked = acknowledged, skip recheck
+          AND NOT EXISTS (
+              SELECT 1 FROM comments r
+              WHERE r.user_id = ? AND r.ancestor_path LIKE '%' || a.comment_id || '%' AND r.id > a.comment_id
+          )
         ORDER BY a.updated_at DESC
         LIMIT ?
-    """, (UNRESPONDED_TARGET * 2,)).fetchall()
+    """, (USER_ID, UNRESPONDED_TARGET * 2,)).fetchall()
 
     if not rows:
         print(f"{ts()} Recheck: nothing to check.")
