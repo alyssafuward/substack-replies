@@ -908,7 +908,6 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       <div class="stat"><strong>{stats['activity_items']}</strong>replies tracked</div>
       <!-- insights link hidden: <a href="/insights" target="_blank" class="stat stat-link"><strong>Insights</strong>Dashboard →</a> -->
     </div>
-    <div class="subtitle">Synced up to {stats['synced_up_to']}</div>
     {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
   </div>
 
@@ -956,7 +955,10 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       </div>
       <pre class="sync-log" id="sync-log" style="display:none"></pre>
       <div id="last-sync-log-wrap" style="display:none; margin-top:6px;">
-        <button onclick="toggleLastLog(this)" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <button onclick="toggleLastLog(this)" style="background:none; border:none; cursor:pointer; font-size:0.8rem; color:#888; padding:0;">▶ Last sync log</button>
+          <span style="font-size:0.78rem; color:#bbb;">Synced up to {stats['synced_up_to']}</span>
+        </div>
         <pre class="sync-log" id="last-sync-log" style="display:none; margin-top:4px;"></pre>
       </div>
     </div>
