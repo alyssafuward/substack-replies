@@ -913,8 +913,9 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
   </div>
 
-  <div id="sync-busy-banner" style="display:none; max-width:720px; margin:0 auto 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px 16px; font-size:0.88rem; color:#856404;">
-    A sync is already in progress. Please wait for it to finish before starting another.
+  <div id="sync-busy-banner" style="display:none; max-width:720px; margin:0 auto 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px 16px; font-size:0.88rem; color:#856404; display:none; align-items:center; justify-content:space-between; gap:12px;">
+    <span>A sync is already in progress.</span>
+    <button onclick="fetch('/sync/stop',{{method:'POST'}}).then(()=>{{document.getElementById('sync-busy-banner').style.display='none';}})" style="background:#856404; color:#fff3cd; border:none; border-radius:4px; padding:4px 12px; font-size:0.82rem; cursor:pointer; white-space:nowrap;">Stop sync</button>
   </div>
 
   <div style="max-width:720px; margin:0 auto 10px;">
@@ -1534,7 +1535,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       .then(r => r.json())
       .then(data => {{
         if (data.running) {{
-          document.getElementById('sync-busy-banner').style.display = '';
+          document.getElementById('sync-busy-banner').style.display = 'flex';
         }}
       }})
       .catch(() => {{}});
