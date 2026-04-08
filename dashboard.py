@@ -86,7 +86,7 @@ def load_data(conn):
             "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
         ).fetchone()
         your_row = conn.execute(
-            "SELECT body FROM comments WHERE id=?", (your_id,)
+            "SELECT body, user_id FROM comments WHERE id=?", (your_id,)
         ).fetchone()
 
         if not reply_row:
@@ -99,6 +99,7 @@ def load_data(conn):
         post_url = reply_row[4]
         reply_raw = json.loads(reply_row[5] or "{}")
         your_body = your_row[0] if your_row else ""
+        target_user_id = your_row[1] if your_row else None
         label = "replied to your note" if item_type == "note_reply" else "replied to your comment"
         liked = bool(reply_raw.get("reaction"))
 
@@ -112,7 +113,9 @@ def load_data(conn):
             link = ""
 
         thread = load_thread(conn, reply_id)
-        guest_post = bool(post_url) and not any(f"{sub}.substack.com" in post_url for sub in OWN_PUBS)
+        is_non_own_pub = bool(post_url) and not any(f"{sub}.substack.com" in post_url for sub in OWN_PUBS)
+        is_direct = item_type == "note_reply" or target_user_id == USER_ID
+        guest_post = is_non_own_pub and not is_direct
 
         results.append({
             "source": "activity",
