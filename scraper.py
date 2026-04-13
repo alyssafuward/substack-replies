@@ -30,7 +30,7 @@ except ImportError:
 
 DB_PATH = Path(__file__).parent / "replies.db"
 
-REPLY_TYPES = {"note_reply", "comment_reply", "new_comment"}
+REPLY_TYPES = {"note_reply", "comment_reply", "new_comment", "comment_mention"}
 UNRESPONDED_TARGET = 250
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ def recheck_note_replies(conn):
         FROM activity_items a
         LEFT JOIN comments c ON c.id = a.comment_id
         WHERE a.is_responded = 0
-          AND a.type = 'note_reply'
+          AND a.type IN ('note_reply', 'comment_mention')
           AND a.comment_id IS NOT NULL
           AND (c.raw_json IS NULL OR json_extract(c.raw_json, '$.reaction') IS NULL)
         ORDER BY a.updated_at DESC
@@ -460,13 +460,13 @@ def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_l
                 """, (USER_ID, f"%{comment_id}%", comment_id)).fetchone()
 
                 # For liked replies: recheck skips them, so check for your reply now
-                if not your_reply and item_type in ("note_reply", "comment_reply"):
+                if not your_reply and item_type in ("note_reply", "comment_reply", "comment_mention"):
                     stored = conn.execute("SELECT raw_json FROM comments WHERE id=?", (comment_id,)).fetchone()
                     if stored:
                         try:
                             raw = json.loads(stored[0] or "{}")
                             if raw.get("reaction"):
-                                if item_type == "note_reply":
+                                if item_type in ("note_reply", "comment_mention"):
                                     replies_data = get(
                                         f"https://substack.com/api/v1/reader/comment/{comment_id}/replies?comment_id={comment_id}"
                                     )
