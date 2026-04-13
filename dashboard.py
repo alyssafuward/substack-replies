@@ -62,14 +62,14 @@ def load_data(conn):
     rows = conn.execute("""
         SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json, a.is_responded
         FROM activity_items a
-        WHERE a.type IN ('note_reply', 'comment_reply')
+        WHERE a.type IN ('note_reply', 'comment_reply', 'comment_mention')
           AND (a.is_archived IS NULL OR a.is_archived = 0)
         ORDER BY a.created_at DESC
     """).fetchall()
 
     for row in rows:
         item_id, item_type, created_at, reply_id, your_id, raw, is_responded = row
-        if not reply_id or not your_id:
+        if not reply_id or (not your_id and item_type != 'comment_mention'):
             continue
 
         # Check if you already replied back (recheck flag or response comment in DB)
@@ -87,7 +87,7 @@ def load_data(conn):
         ).fetchone()
         your_row = conn.execute(
             "SELECT body FROM comments WHERE id=?", (your_id,)
-        ).fetchone()
+        ).fetchone() if your_id else None
 
         if not reply_row:
             continue
@@ -99,10 +99,15 @@ def load_data(conn):
         post_url = reply_row[4]
         reply_raw = json.loads(reply_row[5] or "{}")
         your_body = your_row[0] if your_row else ""
-        label = "replied to your note" if item_type == "note_reply" else "replied to your comment"
+        if item_type == "note_reply":
+            label = "replied to your note"
+        elif item_type == "comment_mention":
+            label = "mentioned you in a note"
+        else:
+            label = "replied to your comment"
         liked = bool(reply_raw.get("reaction"))
 
-        if item_type == "note_reply" and reply_handle:
+        if item_type in ("note_reply", "comment_mention") and reply_handle:
             link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
         elif post_url:
             link = _comment_link(post_url, reply_id)
@@ -196,20 +201,20 @@ def load_responded_data(conn):
     rows = conn.execute("""
         SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
         FROM activity_items a
-        WHERE a.type IN ('note_reply', 'comment_reply')
+        WHERE a.type IN ('note_reply', 'comment_reply', 'comment_mention')
           AND a.is_responded = 1
         ORDER BY a.created_at DESC
     """).fetchall()
 
     for row in rows:
         item_id, item_type, created_at, reply_id, your_id, raw = row
-        if not reply_id or not your_id:
+        if not reply_id or (not your_id and item_type != 'comment_mention'):
             continue
 
         reply_row = conn.execute(
             "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
         ).fetchone()
-        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone()
+        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone() if your_id else None
 
         if not reply_row:
             continue
@@ -221,7 +226,12 @@ def load_responded_data(conn):
         post_url = reply_row[4]
         reply_raw = json.loads(reply_row[5] or "{}")
         your_body = your_row[0] if your_row else ""
-        label = "replied to your note" if item_type == "note_reply" else "replied to your comment"
+        if item_type == "note_reply":
+            label = "replied to your note"
+        elif item_type == "comment_mention":
+            label = "mentioned you in a note"
+        else:
+            label = "replied to your comment"
 
         # Find your reply back to this person
         reply_back_row = conn.execute("""
@@ -231,7 +241,7 @@ def load_responded_data(conn):
         """, (USER_ID, f"%{reply_id}%", reply_id)).fetchone()
         your_reply_back = reply_back_row[0] if reply_back_row else ""
 
-        if item_type == "note_reply" and reply_handle:
+        if item_type in ("note_reply", "comment_mention") and reply_handle:
             link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
         elif post_url:
             link = _comment_link(post_url, reply_id)
@@ -267,20 +277,20 @@ def load_archived_data(conn):
     rows = conn.execute("""
         SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
         FROM activity_items a
-        WHERE a.type IN ('note_reply', 'comment_reply')
+        WHERE a.type IN ('note_reply', 'comment_reply', 'comment_mention')
           AND a.is_archived = 1
         ORDER BY a.created_at DESC
     """).fetchall()
 
     for row in rows:
         item_id, item_type, created_at, reply_id, your_id, raw = row
-        if not reply_id or not your_id:
+        if not reply_id or (not your_id and item_type != 'comment_mention'):
             continue
 
         reply_row = conn.execute(
             "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
         ).fetchone()
-        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone()
+        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone() if your_id else None
 
         if not reply_row:
             continue
@@ -292,9 +302,14 @@ def load_archived_data(conn):
         post_url = reply_row[4]
         reply_raw = json.loads(reply_row[5] or "{}")
         your_body = your_row[0] if your_row else ""
-        label = "replied to your note" if item_type == "note_reply" else "replied to your comment"
+        if item_type == "note_reply":
+            label = "replied to your note"
+        elif item_type == "comment_mention":
+            label = "mentioned you in a note"
+        else:
+            label = "replied to your comment"
 
-        if item_type == "note_reply" and reply_handle:
+        if item_type in ("note_reply", "comment_mention") and reply_handle:
             link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
         elif post_url:
             link = f"{post_url.rstrip('/')}/comment/{reply_id}"
