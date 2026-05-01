@@ -237,20 +237,25 @@ def index():
 def render_empty():
     return """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Substack Replies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-         background: #f5f4f0; color: #1a1a1a; padding: 24px; }
+  body { font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+         background: #F2F8FD; color: #1A1A1A; padding: 24px; }
   .header { max-width: 720px; margin: 0 auto 20px; }
-  h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }
+  h1 { font-family: 'DM Serif Display', Georgia, serif; font-size: 1.8rem; font-weight: 400; margin-bottom: 4px; }
   .subtitle { color: #666; font-size: 0.9rem; margin-bottom: 16px; }
   .sync-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
-  .sync-btn { background: #ff3300; color: white; border: none; border-radius: 6px;
-               padding: 6px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+  .sync-btn { background: #1F6FA8; color: white; border: none; border-radius: 6px;
+               padding: 6px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+               font-family: 'DM Sans', sans-serif; }
   .sync-btn:disabled { background: #ccc; cursor: default; }
   .sync-status { font-size: 0.82rem; color: #888; }
-  .sync-log { margin-top: 10px; padding: 10px; background: #1a1a1a; color: #ccc;
+  .sync-log { margin-top: 10px; padding: 10px; background: #1A1A1A; color: #ccc;
                font-size: 0.75rem; border-radius: 6px; max-height: 300px; overflow-y: auto;
                white-space: pre-wrap; max-width: 720px; }
+  select { border: 1px solid #D8ECF8; border-radius: 6px; font-family: 'DM Sans', sans-serif; }
 </style></head>
 <body>
   <div class="header">
@@ -258,7 +263,7 @@ def render_empty():
     <div class="subtitle">No data yet — run a sync to get started.</div>
     <div class="sync-row">
       <label style="font-size:0.82rem; color:#666;">New replies to sync:</label>
-      <select id="sync-count" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
+      <select id="sync-count" style="font-size:0.82rem; padding:4px 6px;">
         <option value="25" selected>25</option>
         <option value="50">50</option>
         <option value="100">100</option>

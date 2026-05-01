@@ -663,7 +663,7 @@ def render_post_comments_tab(posts_data, pub_subdomain, liked_acknowledged=True)
     return f"""  <div class="posts-controls">
     <div class="sync-row">
       <label style="font-size:0.82rem; color:#666;">Load until:</label>
-      <select id="load-count-{pub_esc}" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
+      <select id="load-count-{pub_esc}" style="font-size:0.82rem; padding:4px 6px;">
         <option value="10">10 unanswered</option>
         <option value="25" selected>25 unanswered</option>
         <option value="50">50 unanswered</option>
@@ -730,28 +730,31 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Substack Replies</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f5f4f0; color: #1a1a1a; padding: 24px;
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #F2F8FD; color: #1A1A1A; padding: 24px;
     }}
     .header {{ max-width: 720px; margin: 0 auto 16px; }}
-    h1 {{ font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }}
-    .tagline {{ font-size: 1.15rem; color: #444; margin-top: 6px; margin-bottom: 6px; }}
+    h1 {{ font-family: 'DM Serif Display', Georgia, serif; font-size: 1.8rem; font-weight: 400; margin-bottom: 4px; }}
+    .tagline {{ font-size: 1.05rem; color: #666; margin-top: 6px; margin-bottom: 6px; }}
     .subtitle {{ color: #aaa; font-size: 0.78rem; margin-top: 8px; }}
     .stats {{ display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }}
     .stat {{
       background: white; border-radius: 8px; padding: 8px 14px;
-      font-size: 0.8rem; color: #555; border: 1px solid #e5e5e5;
+      font-size: 0.8rem; color: #555; border: 1px solid #D8ECF8;
     }}
-    .stat strong {{ color: #1a1a1a; font-size: 1rem; display: block; }}
+    .stat strong {{ color: #1A1A1A; font-size: 1rem; display: block; }}
     .stat-link {{
-      text-decoration: none; color: #cc3300;
-      border-color: #ffd5cc; background: #fff8f7;
+      text-decoration: none; color: #1F6FA8;
+      border-color: #C8DEF0; background: #F2F8FD;
     }}
-    .stat-link strong {{ color: #cc3300; font-size: 1rem; }}
-    .stat-link:hover {{ background: #fff0ee; border-color: #ff3300; }}
+    .stat-link strong {{ color: #1F6FA8; font-size: 1rem; }}
+    .stat-link:hover {{ background: #C8DEF0; border-color: #1F6FA8; }}
     .gap-warning {{
       max-width: 720px; margin: 10px auto 0;
       background: #fffbe6; border: 1px solid #f0c040; border-radius: 6px;
@@ -759,37 +762,39 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
     .tab-nav {{
       max-width: 720px; margin: 0 auto 20px;
-      border-bottom: 2px solid #e5e5e5; display: flex;
+      border-bottom: 2px solid #D8ECF8; display: flex;
     }}
     .tab-btn {{
       background: none; border: none; cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
       font-size: 0.9rem; font-weight: 600; color: #aaa;
       padding: 8px 18px; border-bottom: 2px solid transparent; margin-bottom: -2px;
     }}
-    .tab-btn.active {{ color: #1a1a1a; border-bottom-color: #ff3300; }}
-    .tab-btn:hover:not(.active) {{ color: #666; }}
+    .tab-btn.active {{ color: #1A1A1A; border-bottom-color: #1F6FA8; }}
+    .tab-btn:hover:not(.active) {{ color: #1F6FA8; }}
     .sync-row {{ display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }}
     .sync-btn {{
-      background: #ff3300; color: white; border: none; border-radius: 6px;
+      background: #1F6FA8; color: white; border: none; border-radius: 6px;
       padding: 6px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
     }}
     .sync-btn:disabled {{ background: #ccc; cursor: default; }}
-    .sync-btn:hover:not(:disabled) {{ background: #cc2900; }}
+    .sync-btn:hover:not(:disabled) {{ background: #185d8f; }}
     .sync-status {{ font-size: 0.82rem; color: #888; }}
     .sync-log {{
-      margin-top: 10px; padding: 10px; background: #1a1a1a; color: #ccc;
+      margin-top: 10px; padding: 10px; background: #1A1A1A; color: #ccc;
       font-size: 0.75rem; border-radius: 6px; max-height: 200px; overflow-y: auto;
       white-space: pre-wrap; word-break: break-all;
     }}
     .load-more-link {{
-      font-size: 0.85rem; font-weight: 600; color: #1a1a1a;
-      background: white; border: 1px solid #ccc; border-radius: 6px;
+      font-size: 0.85rem; font-weight: 600; color: #1F6FA8;
+      background: white; border: 1px solid #D8ECF8; border-radius: 6px;
       padding: 5px 14px; text-decoration: none; white-space: nowrap;
     }}
-    .load-more-link:hover {{ background: #f5f5f5; color: #1a1a1a; }}
+    .load-more-link:hover {{ background: #F2F8FD; }}
     .count-banner {{
       max-width: 720px; margin: 0 auto 20px;
-      background: #ff3300; color: white;
+      background: #1F6FA8; color: white;
       border-radius: 8px; padding: 12px 18px;
       font-weight: 600; font-size: 1rem;
     }}
@@ -797,9 +802,9 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     .cards {{ max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }}
     .card {{
       background: white; border-radius: 10px; padding: 16px 18px;
-      border: 1px solid #e5e5e5; transition: box-shadow 0.15s;
+      border: 1px solid #D8ECF8; transition: box-shadow 0.15s;
     }}
-    .card:hover {{ box-shadow: 0 2px 12px rgba(0,0,0,0.07); }}
+    .card:hover {{ box-shadow: 0 2px 14px rgba(31,111,168,0.09); }}
     .card-header {{
       display: flex; justify-content: space-between; align-items: center;
       margin-bottom: 10px; gap: 8px;
@@ -807,92 +812,98 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     .card-meta {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
     .card-actions {{ display: flex; align-items: center; gap: 10px; flex-shrink: 0; }}
     .badge {{
-      background: #fff0ee; color: #cc3300;
+      background: #EAF3FB; color: #1F6FA8;
       font-size: 0.7rem; font-weight: 700;
       padding: 2px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em;
     }}
     .liked-badge {{
-      font-size: 0.75rem; color: #999; background: #f5f5f5;
-      padding: 2px 8px; border-radius: 20px; border: 1px solid #e5e5e5;
+      font-size: 0.75rem; color: #999; background: #F2F8FD;
+      padding: 2px 8px; border-radius: 20px; border: 1px solid #D8ECF8;
     }}
     .date {{ font-size: 0.8rem; color: #bbb; }}
     .reply-link {{
-      font-size: 0.82rem; color: #cc3300; text-decoration: none; font-weight: 500; white-space: nowrap;
+      font-size: 0.82rem; color: #1F6FA8; text-decoration: none; font-weight: 500; white-space: nowrap;
     }}
     .reply-link:hover {{ text-decoration: underline; }}
     .archive-btn {{
-      background: none; border: 1px solid #ccc; border-radius: 4px;
+      background: none; border: 1px solid #D8ECF8; border-radius: 4px;
       font-size: 0.78rem; color: #999; cursor: pointer; padding: 2px 8px;
     }}
-    .archive-btn:hover {{ background: #f5f5f5; color: #555; border-color: #aaa; }}
+    .archive-btn:hover {{ background: #F2F8FD; color: #555; border-color: #C8DEF0; }}
     .who {{ font-weight: 600; font-size: 0.97rem; margin-bottom: 8px; }}
     .who-link {{ font-weight: 600; color: inherit; text-decoration: none; }}
-    .who-link:hover {{ color: #cc3300; text-decoration: underline; }}
+    .who-link:hover {{ color: #1F6FA8; text-decoration: underline; }}
     .label {{ font-weight: 400; color: #666; }}
     .field-label {{ font-size: 0.72rem; font-weight: 700; color: #bbb; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 4px; }}
     .your-content {{
       font-size: 0.85rem; color: #888; margin-bottom: 8px;
-      padding: 7px 11px; background: #fafafa; border-radius: 6px; border-left: 3px solid #e0e0e0;
+      padding: 7px 11px; background: #F2F8FD; border-radius: 6px; border-left: 3px solid #C8DEF0;
     }}
     .thread-context {{ margin-bottom: 8px; }}
     .thread-toggle {{
       background: none; border: none; cursor: pointer;
       font-size: 0.75rem; color: #bbb; padding: 0 0 4px 0;
     }}
-    .thread-toggle:hover {{ color: #888; }}
+    .thread-toggle:hover {{ color: #1F6FA8; }}
     .thread-msg {{
       font-size: 0.82rem; color: #999;
-      padding: 5px 10px; background: #f7f7f7; border-radius: 6px;
-      border-left: 3px solid #e0e0e0; margin-bottom: 4px;
+      padding: 5px 10px; background: #F2F8FD; border-radius: 6px;
+      border-left: 3px solid #C8DEF0; margin-bottom: 4px;
     }}
-    .thread-name {{ font-weight: 600; color: #888; margin-right: 6px; }}
-    .thread-name-link {{ font-weight: 600; color: #888; margin-right: 6px; text-decoration: none; }}
-    .thread-name-link:hover {{ color: #cc3300; text-decoration: underline; }}
+    .thread-name {{ font-weight: 600; color: #666; margin-right: 6px; }}
+    .thread-name-link {{ font-weight: 600; color: #666; margin-right: 6px; text-decoration: none; }}
+    .thread-name-link:hover {{ color: #1F6FA8; text-decoration: underline; }}
     .thread-body {{ color: #aaa; }}
     .thread-more {{ background: none; border: none; cursor: pointer; color: #bbb; font-size: 0.78rem; padding: 0; }}
-    .thread-more:hover {{ color: #888; }}
+    .thread-more:hover {{ color: #1F6FA8; }}
     .their-content {{
       font-size: 0.92rem; color: #222;
-      padding: 7px 11px; background: #fef8f6; border-radius: 6px; border-left: 3px solid #ff3300;
+      padding: 7px 11px; background: #F2F8FD; border-radius: 6px; border-left: 3px solid #1F6FA8;
     }}
     .empty {{ max-width: 720px; margin: 40px auto; text-align: center; font-size: 1.1rem; color: #555; }}
     .toggle-section {{ max-width: 720px; margin: 16px auto 0; }}
     .toggle-btn {{
       background: none; border: none; cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
       font-size: 0.82rem; font-weight: 700; color: #aaa;
       text-transform: uppercase; letter-spacing: 0.06em; padding: 0;
     }}
-    .toggle-btn:hover {{ color: #666; }}
+    .toggle-btn:hover {{ color: #1F6FA8; }}
     .intro {{ max-width: 720px; margin: 0 auto 16px; font-size: 0.88rem; color: #666; line-height: 1.5; }}
     .how-it-works-link {{
       font-size: 0.8rem; color: #bbb; margin-top: 6px;
       display: block; text-underline-offset: 2px;
     }}
-    .how-it-works-link:hover {{ color: #888; }}
+    .how-it-works-link:hover {{ color: #1F6FA8; }}
     .liked-section {{ display: none; margin-top: 10px; }}
-    .liked-section .card {{ opacity: 0.55; background: #fafafa; }}
-    .liked-section .card:hover {{ opacity: 0.8; }}
+    .liked-section .card {{ opacity: 0.6; background: #fafcff; }}
+    .liked-section .card:hover {{ opacity: 0.85; }}
     .post-section {{
       background: white; border-radius: 10px; padding: 16px 18px;
-      border: 1px solid #e5e5e5; margin-bottom: 12px;
+      border: 1px solid #D8ECF8; margin-bottom: 12px;
       max-width: 720px; margin-left: auto; margin-right: auto;
     }}
     .post-header {{
       display: flex; justify-content: space-between; align-items: baseline;
-      margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #f0f0f0;
+      margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #D8ECF8;
     }}
     .post-title {{ font-weight: 700; font-size: 1rem; }}
-    .post-title a {{ color: #1a1a1a; text-decoration: none; }}
-    .post-title a:hover {{ text-decoration: underline; }}
+    .post-title a {{ color: #1A1A1A; text-decoration: none; }}
+    .post-title a:hover {{ text-decoration: underline; color: #1F6FA8; }}
     .post-date {{ font-size: 0.8rem; color: #bbb; flex-shrink: 0; margin-left: 12px; }}
     .post-empty {{ font-size: 0.85rem; color: #aaa; padding: 4px 0; }}
     .post-comment-card {{
-      padding: 10px 0; border-bottom: 1px solid #f5f5f5;
+      padding: 10px 0; border-bottom: 1px solid #D8ECF8;
     }}
     .post-comment-card:last-child {{ border-bottom: none; }}
     .your-reply-preview {{ margin-top: 5px; font-size: 0.82rem; color: #888; font-style: italic; }}
     .posts-controls {{ max-width: 720px; margin: 0 auto 20px; }}
-    a {{ color: #bbb; }}
+    a {{ color: #1F6FA8; }}
+    input[type="text"], input[type="date"], select {{
+      border: 1px solid #D8ECF8 !important; border-radius: 6px !important;
+      font-family: 'DM Sans', sans-serif;
+    }}
+    input[type="text"]:focus, input[type="date"]:focus {{ outline: none; border-color: #1F6FA8 !important; box-shadow: 0 0 0 2px rgba(31,111,168,0.12); }}
     @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
   </style>
 </head>
@@ -908,25 +919,25 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     {f'<div class="gap-warning">⚠️ {stats["gap_warning"]}</div>' if stats.get("gap_warning") else ""}
   </div>
 
-  <div id="sync-busy-banner" style="display:none; max-width:720px; margin:0 auto 16px; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:10px 16px; font-size:0.88rem; color:#856404; display:none; align-items:center; justify-content:space-between; gap:12px;">
+  <div id="sync-busy-banner" style="display:none; max-width:720px; margin:0 auto 16px; background:#EAF3FB; border:1px solid #C8DEF0; border-radius:8px; padding:10px 16px; font-size:0.88rem; color:#1F6FA8; display:none; align-items:center; justify-content:space-between; gap:12px;">
     <span>A sync is already in progress.</span>
-    <button onclick="fetch('/sync/stop',{{method:'POST'}}).then(()=>{{document.getElementById('sync-busy-banner').style.display='none';}})" style="background:#856404; color:#fff3cd; border:none; border-radius:4px; padding:4px 12px; font-size:0.82rem; cursor:pointer; white-space:nowrap;">Stop sync</button>
+    <button onclick="fetch('/sync/stop',{{method:'POST'}}).then(()=>{{document.getElementById('sync-busy-banner').style.display='none';}})" style="background:#1F6FA8; color:white; border:none; border-radius:4px; padding:4px 12px; font-size:0.82rem; cursor:pointer; white-space:nowrap; font-family:'DM Sans',sans-serif;">Stop sync</button>
   </div>
 
   <div style="max-width:720px; margin:0 auto 10px; display:flex; gap:8px;">
     <input type="text" id="search-name" placeholder="Filter by username…" oninput="applyFilters()"
-           style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+           style="flex:1; padding:8px 12px; font-size:0.9rem; background:white;">
     <input type="text" id="search-keyword" placeholder="Filter by keyword…" oninput="applyFilters()"
-           style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+           style="flex:1; padding:8px 12px; font-size:0.9rem; background:white;">
   </div>
   <div style="max-width:720px; margin:0 auto 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
     <label style="font-size:0.82rem; color:#666; white-space:nowrap;">Date range:</label>
     <input type="date" id="date-from" onchange="applyFilters()"
-           style="padding:5px 8px; border:1px solid #ddd; border-radius:6px; font-size:0.82rem; background:white;">
+           style="padding:5px 8px; font-size:0.82rem; background:white;">
     <span style="font-size:0.82rem; color:#999;">to</span>
     <input type="date" id="date-to" onchange="applyFilters()"
-           style="padding:5px 8px; border:1px solid #ddd; border-radius:6px; font-size:0.82rem; background:white;">
-    <button onclick="clearDateFilter()" style="font-size:0.78rem; color:#888; background:none; border:none; cursor:pointer; text-decoration:underline; padding:0;">Clear</button>
+           style="padding:5px 8px; font-size:0.82rem; background:white;">
+    <button onclick="clearDateFilter()" style="font-size:0.78rem; color:#1F6FA8; background:none; border:none; cursor:pointer; text-decoration:underline; padding:0;">Clear</button>
   </div>
   <div style="max-width:720px; margin:0 auto 10px; font-size:0.82rem; color:#666;">
     <label style="cursor:pointer; user-select:none;">
@@ -937,8 +948,8 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     </label>
   </div>
 
-  <div id="page-loading" style="display:none; position:fixed; inset:0; background:rgba(245,244,240,0.75); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px;">
-    <div style="width:28px; height:28px; border:3px solid #ddd; border-top-color:#cc3300; border-radius:50%; animation:spin 0.7s linear infinite;"></div>
+  <div id="page-loading" style="display:none; position:fixed; inset:0; background:rgba(242,248,253,0.85); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px;">
+    <div style="width:28px; height:28px; border:3px solid #D8ECF8; border-top-color:#1F6FA8; border-radius:50%; animation:spin 0.7s linear infinite;"></div>
     <div style="font-size:0.85rem; color:#666;">Reloading…</div>
   </div>
 
@@ -951,7 +962,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <div style="max-width:720px; margin:0 auto;">
       <div class="sync-row">
         <label style="font-size:0.82rem; color:#666;">New replies to sync:</label>
-        <select id="sync-count" style="font-size:0.82rem; padding:4px 6px; border-radius:4px; border:1px solid #ccc;">
+        <select id="sync-count" style="font-size:0.82rem; padding:4px 6px;">
           <option value="25" selected>25</option>
           <option value="50">50</option>
           <option value="100">100</option>
