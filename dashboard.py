@@ -556,8 +556,9 @@ def render_card(item, section="action"):
         reply_back_html = f'<div class="your-reply-preview">↩ {reply_back_esc}</div>'
 
     who_key = escape((item["who"] + " " + item.get("handle", "")).strip().lower())
+    item_date = item.get("date", "")[:10]
     return f"""
-    <div class="card" data-id="{cid}" data-section="{section}" data-who="{who_key}">
+    <div class="card" data-id="{cid}" data-section="{section}" data-who="{who_key}" data-date="{item_date}">
       <div class="card-header">
         <div class="card-meta">
           <span class="badge">{source_badge}</span>
@@ -599,7 +600,8 @@ def render_post_comment_card(c):
         reply_esc = escape(your_reply[:200] + ("..." if len(your_reply) > 200 else ""))
         reply_html = f'<div class="your-reply-preview">↩ {reply_esc}</div>'
 
-    return f"""    <div class="post-comment-card">
+    item_date = c.get("date", "")[:10]
+    return f"""    <div class="post-comment-card" data-date="{item_date}">
       <div class="card-header">
         <div class="card-meta">{liked_badge}<span class="date">{date}</span></div>
         <div class="card-actions">{link_html}</div>
@@ -911,9 +913,20 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <button onclick="fetch('/sync/stop',{{method:'POST'}}).then(()=>{{document.getElementById('sync-busy-banner').style.display='none';}})" style="background:#856404; color:#fff3cd; border:none; border-radius:4px; padding:4px 12px; font-size:0.82rem; cursor:pointer; white-space:nowrap;">Stop sync</button>
   </div>
 
-  <div style="max-width:720px; margin:0 auto 10px;">
-    <input type="text" id="global-search" placeholder="Search by name, keyword, or phrase across all tabs…" oninput="globalSearch(this.value)"
-           style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+  <div style="max-width:720px; margin:0 auto 10px; display:flex; gap:8px;">
+    <input type="text" id="search-name" placeholder="Filter by username…" oninput="applyFilters()"
+           style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+    <input type="text" id="search-keyword" placeholder="Filter by keyword…" oninput="applyFilters()"
+           style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+  </div>
+  <div style="max-width:720px; margin:0 auto 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <label style="font-size:0.82rem; color:#666; white-space:nowrap;">Date range:</label>
+    <input type="date" id="date-from" onchange="applyFilters()"
+           style="padding:5px 8px; border:1px solid #ddd; border-radius:6px; font-size:0.82rem; background:white;">
+    <span style="font-size:0.82rem; color:#999;">to</span>
+    <input type="date" id="date-to" onchange="applyFilters()"
+           style="padding:5px 8px; border:1px solid #ddd; border-radius:6px; font-size:0.82rem; background:white;">
+    <button onclick="clearDateFilter()" style="font-size:0.78rem; color:#888; background:none; border:none; cursor:pointer; text-decoration:underline; padding:0;">Clear</button>
   </div>
   <div style="max-width:720px; margin:0 auto 10px; font-size:0.82rem; color:#666;">
     <label style="cursor:pointer; user-select:none;">
@@ -1209,11 +1222,33 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }});
     }}
 
-    function cardMatches(card, q) {{
-      if (!q) return true;
-      const who = (card.dataset.who || (card.querySelector('.who') || {{}}).textContent || '').toLowerCase();
-      const body = ((card.querySelector('.their-content') || {{}}).textContent || '').toLowerCase();
-      return who.includes(q) || body.includes(q);
+    function cardMatches(card, nameQ, keyQ, dateFrom, dateTo) {{
+      const date = card.dataset.date || '';
+      if (dateFrom && date && date < dateFrom) return false;
+      if (dateTo && date && date > dateTo) return false;
+      if (nameQ) {{
+        const who = (card.dataset.who || (card.querySelector('.who') || {{}}).textContent || '').toLowerCase();
+        if (!who.includes(nameQ)) return false;
+      }}
+      if (keyQ) {{
+        const body = ((card.querySelector('.their-content') || {{}}).textContent || '').toLowerCase();
+        if (!body.includes(keyQ)) return false;
+      }}
+      return true;
+    }}
+
+    function clearDateFilter() {{
+      document.getElementById('date-from').value = '';
+      document.getElementById('date-to').value = '';
+      applyFilters();
+    }}
+
+    function applyFilters() {{
+      const nameQ = (document.getElementById('search-name').value || '').toLowerCase().trim();
+      const keyQ = (document.getElementById('search-keyword').value || '').toLowerCase().trim();
+      const dateFrom = document.getElementById('date-from').value || '';
+      const dateTo = document.getElementById('date-to').value || '';
+      globalSearch(nameQ, keyQ, dateFrom, dateTo);
     }}
 
     function setTabLabel(tabId, count) {{
@@ -1223,8 +1258,12 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       btn.textContent = (count !== null) ? base + ' (' + count + ')' : base;
     }}
 
-    function globalSearch(q) {{
-      q = q.toLowerCase().trim();
+    function globalSearch(nameQ, keyQ, dateFrom, dateTo) {{
+      nameQ = nameQ || '';
+      keyQ = keyQ || '';
+      dateFrom = dateFrom || '';
+      dateTo = dateTo || '';
+      const hasFilter = nameQ || keyQ || dateFrom || dateTo;
 
       // ── Replies tab ──
       let repliesTotal = 0;
@@ -1233,13 +1272,13 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const actionCards = document.querySelectorAll('#action-cards .card');
       let visibleAction = 0;
       actionCards.forEach(card => {{
-        const show = cardMatches(card, q);
+        const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
         card.style.display = show ? '' : 'none';
         if (show && !card.classList.contains('hidden-card')) visibleAction++;
         if (show) repliesTotal++;
       }});
       const showMoreWrap = document.getElementById('show-more-btn');
-      if (showMoreWrap) showMoreWrap.closest('.toggle-section').style.display = q ? 'none' : '';
+      if (showMoreWrap) showMoreWrap.closest('.toggle-section').style.display = hasFilter ? 'none' : '';
       const remaining = document.getElementById('remaining');
       if (remaining) remaining.textContent = visibleAction;
 
@@ -1253,17 +1292,17 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
         const cards = document.querySelectorAll('#' + cardsId + ' .card');
         let visible = 0;
         cards.forEach(card => {{
-          const show = cardMatches(card, q);
+          const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
           card.style.display = show ? '' : 'none';
           if (show) {{ visible++; repliesTotal++; }}
         }});
         const countEl = document.getElementById(countId);
         if (countEl) countEl.textContent = visible;
         const wrapEl = document.getElementById(wrapId);
-        if (wrapEl) wrapEl.style.display = (!q || visible > 0) ? '' : 'none';
+        if (wrapEl) wrapEl.style.display = (!hasFilter || visible > 0) ? '' : 'none';
       }});
 
-      setTabLabel('replies', q ? repliesTotal : null);
+      setTabLabel('replies', hasFilter ? repliesTotal : null);
 
       // ── Pub tabs ──
       allPubs.forEach(pub => {{
@@ -1276,7 +1315,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 
           // Filter direct (unanswered) cards
           section.querySelectorAll(':scope > .post-comment-card').forEach(card => {{
-            const show = cardMatches(card, q);
+            const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
             card.style.display = show ? '' : 'none';
             if (show) sectionCount++;
           }});
@@ -1286,31 +1325,31 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
             const innerCards = toggleSec.querySelectorAll('.post-comment-card');
             let innerVisible = 0;
             innerCards.forEach(card => {{
-              const show = cardMatches(card, q);
+              const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
               card.style.display = show ? '' : 'none';
               if (show) {{ innerVisible++; sectionCount++; }}
             }});
-            if (q && innerVisible > 0) {{
+            if (hasFilter && innerVisible > 0) {{
               // Auto-open this toggle section so matches are visible
               const inner = toggleSec.querySelector('.liked-section');
               if (inner) inner.style.display = 'block';
               const btn = toggleSec.querySelector('.toggle-btn');
               if (btn) btn.innerHTML = btn.innerHTML.replace('▶', '▼');
-            }} else if (!q) {{
+            }} else if (!hasFilter) {{
               // Restore collapsed
               const inner = toggleSec.querySelector('.liked-section');
               if (inner) inner.style.display = 'none';
               const btn = toggleSec.querySelector('.toggle-btn');
               if (btn) btn.innerHTML = btn.innerHTML.replace('▼', '▶');
             }}
-            toggleSec.style.display = (!q || innerVisible > 0) ? '' : 'none';
+            toggleSec.style.display = (!hasFilter || innerVisible > 0) ? '' : 'none';
           }});
 
-          section.style.display = (!q || sectionCount > 0) ? '' : 'none';
+          section.style.display = (!hasFilter || sectionCount > 0) ? '' : 'none';
           pubTotal += sectionCount;
         }});
 
-        setTabLabel(pub, q ? pubTotal : null);
+        setTabLabel(pub, hasFilter ? pubTotal : null);
       }});
     }}
 
