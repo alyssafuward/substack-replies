@@ -913,9 +913,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     <button onclick="fetch('/sync/stop',{{method:'POST'}}).then(()=>{{document.getElementById('sync-busy-banner').style.display='none';}})" style="background:#856404; color:#fff3cd; border:none; border-radius:4px; padding:4px 12px; font-size:0.82rem; cursor:pointer; white-space:nowrap;">Stop sync</button>
   </div>
 
-  <div style="max-width:720px; margin:0 auto 10px;">
-    <input type="text" id="global-search" placeholder="Search by name, keyword, or phrase across all tabs…" oninput="applyFilters()"
-           style="width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+  <div style="max-width:720px; margin:0 auto 10px; display:flex; gap:8px;">
+    <input type="text" id="search-name" placeholder="Filter by username…" oninput="applyFilters()"
+           style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
+    <input type="text" id="search-keyword" placeholder="Filter by keyword…" oninput="applyFilters()"
+           style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:0.9rem; background:white;">
   </div>
   <div style="max-width:720px; margin:0 auto 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
     <label style="font-size:0.82rem; color:#666; white-space:nowrap;">Date range:</label>
@@ -1220,14 +1222,19 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }});
     }}
 
-    function cardMatches(card, q, dateFrom, dateTo) {{
+    function cardMatches(card, nameQ, keyQ, dateFrom, dateTo) {{
       const date = card.dataset.date || '';
       if (dateFrom && date && date < dateFrom) return false;
       if (dateTo && date && date > dateTo) return false;
-      if (!q) return true;
-      const who = (card.dataset.who || (card.querySelector('.who') || {{}}).textContent || '').toLowerCase();
-      const body = ((card.querySelector('.their-content') || {{}}).textContent || '').toLowerCase();
-      return who.includes(q) || body.includes(q);
+      if (nameQ) {{
+        const who = (card.dataset.who || (card.querySelector('.who') || {{}}).textContent || '').toLowerCase();
+        if (!who.includes(nameQ)) return false;
+      }}
+      if (keyQ) {{
+        const body = ((card.querySelector('.their-content') || {{}}).textContent || '').toLowerCase();
+        if (!body.includes(keyQ)) return false;
+      }}
+      return true;
     }}
 
     function clearDateFilter() {{
@@ -1237,10 +1244,11 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     }}
 
     function applyFilters() {{
-      const q = (document.getElementById('global-search').value || '').toLowerCase().trim();
+      const nameQ = (document.getElementById('search-name').value || '').toLowerCase().trim();
+      const keyQ = (document.getElementById('search-keyword').value || '').toLowerCase().trim();
       const dateFrom = document.getElementById('date-from').value || '';
       const dateTo = document.getElementById('date-to').value || '';
-      globalSearch(q, dateFrom, dateTo);
+      globalSearch(nameQ, keyQ, dateFrom, dateTo);
     }}
 
     function setTabLabel(tabId, count) {{
@@ -1250,10 +1258,12 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       btn.textContent = (count !== null) ? base + ' (' + count + ')' : base;
     }}
 
-    function globalSearch(q, dateFrom, dateTo) {{
+    function globalSearch(nameQ, keyQ, dateFrom, dateTo) {{
+      nameQ = nameQ || '';
+      keyQ = keyQ || '';
       dateFrom = dateFrom || '';
       dateTo = dateTo || '';
-      const hasFilter = q || dateFrom || dateTo;
+      const hasFilter = nameQ || keyQ || dateFrom || dateTo;
 
       // ── Replies tab ──
       let repliesTotal = 0;
@@ -1262,7 +1272,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       const actionCards = document.querySelectorAll('#action-cards .card');
       let visibleAction = 0;
       actionCards.forEach(card => {{
-        const show = cardMatches(card, q, dateFrom, dateTo);
+        const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
         card.style.display = show ? '' : 'none';
         if (show && !card.classList.contains('hidden-card')) visibleAction++;
         if (show) repliesTotal++;
@@ -1282,7 +1292,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
         const cards = document.querySelectorAll('#' + cardsId + ' .card');
         let visible = 0;
         cards.forEach(card => {{
-          const show = cardMatches(card, q, dateFrom, dateTo);
+          const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
           card.style.display = show ? '' : 'none';
           if (show) {{ visible++; repliesTotal++; }}
         }});
@@ -1305,7 +1315,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 
           // Filter direct (unanswered) cards
           section.querySelectorAll(':scope > .post-comment-card').forEach(card => {{
-            const show = cardMatches(card, q, dateFrom, dateTo);
+            const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
             card.style.display = show ? '' : 'none';
             if (show) sectionCount++;
           }});
@@ -1315,7 +1325,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
             const innerCards = toggleSec.querySelectorAll('.post-comment-card');
             let innerVisible = 0;
             innerCards.forEach(card => {{
-              const show = cardMatches(card, q, dateFrom, dateTo);
+              const show = cardMatches(card, nameQ, keyQ, dateFrom, dateTo);
               card.style.display = show ? '' : 'none';
               if (show) {{ innerVisible++; sectionCount++; }}
             }});
