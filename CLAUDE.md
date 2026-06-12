@@ -17,80 +17,81 @@ If it's missing or expired:
 
 ## First-time setup (new user, no config.py)
 
-If `config.py` doesn't exist, follow these steps in order.
+Walk through this interactively — one step at a time. Do not present all the steps upfront. Complete each step, confirm it worked, then move to the next.
 
-### 1. Check prerequisites
+---
+
+**Step 1: Check prerequisites.** Run these and show the user the results:
 
 ```bash
 python3 --version
 git --version
 ```
 
-If Python 3 isn't installed, tell the user to download it from python.org and come back. On Mac, if Git isn't installed, `git --version` may trigger a prompt to install Xcode Command Line Tools — warn them it's safe.
+If Python 3 isn't installed, tell them to download it from python.org and come back before continuing. On Mac, if Git isn't installed, running `git --version` may trigger a prompt to install Xcode Command Line Tools — warn them this might happen and that it's safe to install. Once both are confirmed, move to step 2.
 
-### 2. Fork or clone?
+---
 
-Ask the user:
+**Step 2: Fork or clone?** Ask this before doing anything else:
 
-> Quick question before we download the app: do you think you might want to customize it — change how it looks, what it tracks, how things are organized? Or do you just want to try it out as-is?
+> Quick question before we download the app: do you think you might want to customize it at some point — change how it looks, what it tracks, how things are organized? Or do you just want to try it out as-is?
 >
 > - **Just try it out** → simple download, no GitHub account needed.
-> - **I want to customize it** → we'll set up your own copy on GitHub. You'll need a free GitHub account.
+> - **I want to customize it** → we'll set up your own copy on GitHub that you can modify. You'll need a free GitHub account.
 
-**If just trying it out (clone):**
+Wait for their answer, then continue.
 
-Ask where they'd like to put it — their Desktop, Documents, or a Projects folder all work. Then clone there:
+**If just trying it out:** Ask where they'd like to keep the app — Desktop, Documents, and home directory all work fine. Then clone there and install dependencies:
 
 ```bash
-git clone https://github.com/alyssafuward/substack-replies.git /path/they/chose/substack-replies
-cd /path/they/chose/substack-replies
+git clone https://github.com/alyssafuward/substack-replies.git ~/Desktop/substack-replies
 pip install -r requirements.txt
 ```
 
-**If they want to customize (fork + clone):**
+(Replace the path with wherever they chose.)
 
-If they don't have a GitHub account, tell them to create one at github.com. Then:
+**If they want to customize:** If they don't have a GitHub account, tell them to create one at github.com — it's free. Once they have one, tell them to:
+1. Go to https://github.com/alyssafuward/substack-replies
+2. Click **Fork** → **Create fork**
 
-1. Tell them to go to https://github.com/alyssafuward/substack-replies and click **Fork** → **Create fork**
-2. Ask for their GitHub username and where they'd like to put it, then:
+Then ask for their GitHub username and where they'd like to keep the app, and clone their fork:
 
 ```bash
-git clone https://github.com/THEIR-USERNAME/substack-replies.git /path/they/chose/substack-replies
-cd /path/they/chose/substack-replies
+git clone https://github.com/THEIR-USERNAME/substack-replies.git ~/Desktop/substack-replies
 pip install -r requirements.txt
 ```
 
-### 3. Get the Substack session cookie
+Confirm the clone and install succeeded before continuing.
 
-The user does this themselves — **do not have them paste the cookie value into chat**. Conversation content is sent to Anthropic's servers and the cookie is a live credential.
+---
 
-Tell the user:
+**Step 3: Substack session cookie.** Tell the user this before anything else:
 
-> This is the one part I can't do for you. A session cookie is how your browser proves to Substack that you're logged in — we need it so the app can fetch your data. Don't share it with anyone, including me. I'll give you a command to store it safely on your machine.
+> This is the one part I can't do for you — and you should not paste the value into this chat. A session cookie is how your browser proves to Substack that you're logged in. We need it so the app can fetch your data on your behalf. Treat it like a password. I'll give you a command to store it safely on your machine.
 
-Walk them through finding it:
-1. Open [substack.com](https://substack.com) logged in
-2. Open DevTools: `Cmd+Option+I` (Mac) or `F12` (Windows)
-3. Click **Application** tab → **Cookies** → `https://substack.com`
-4. Find `substack.sid` and copy its value
+Then walk them through finding it:
+1. Open [substack.com](https://substack.com) in their browser, logged in
+2. Open DevTools: `Cmd+Option+I` on Mac, `F12` on Windows
+3. Click the **Application** tab → **Cookies** → `https://substack.com`
+4. Find the row named `substack.sid` and copy the value
 
-Give them this command to run in Terminal (they replace the placeholder with their value):
+Tell them to run this command in Terminal, replacing the placeholder with the value they copied:
 
 ```bash
 echo 'export SUBSTACK_SID="paste-your-value-here"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-Verify it took:
+Then verify it's set:
 
 ```bash
 echo $SUBSTACK_SID
 ```
 
-If it prints nothing, troubleshoot — they may be on a different shell (`echo $SHELL`).
+If it prints nothing, troubleshoot before continuing — they may be using a different shell (check with `echo $SHELL`).
 
-### 4. Look up their account details
+---
 
-Once `SUBSTACK_SID` is set, fetch their user ID and handle automatically:
+**Step 4: Look up their account details.** Run this to fetch their user ID and handle:
 
 ```python
 import requests, os
@@ -107,9 +108,11 @@ print(f"USER_ID: {data.get('id') or data.get('user_id')}")
 print(f"HANDLE: {data.get('handle', '')}")
 ```
 
-### 5. Get publication IDs
+Note the USER_ID and HANDLE values for the next step.
 
-Ask for the subdomain(s) of their Substack publication(s) — the part before `.substack.com`. For each one:
+---
+
+**Step 5: Publication IDs.** Ask: "What's the subdomain of your Substack publication — the part before `.substack.com`?" For each subdomain they give you:
 
 ```python
 import requests, os
@@ -126,7 +129,9 @@ data = resp.json()
 print(f"{subdomain}: {data.get('id')}")
 ```
 
-### 6. Create config.py
+---
+
+**Step 6: Create config.py.** Write this file with the values from steps 4 and 5:
 
 ```python
 USER_ID = <user_id>
@@ -138,26 +143,34 @@ OWN_PUBS = {
 }
 ```
 
-### 7. Verify and run
+---
+
+**Step 7: Verify.** Run the integrity check:
 
 ```bash
 python check.py
 ```
 
-If any checks fail, diagnose before continuing. Then start the app:
+If any checks fail, diagnose and fix before continuing.
+
+---
+
+**Step 8: Start the app.**
 
 ```bash
 python app.py
 ```
 
-Tell the user to open http://localhost:5001. Explain that this is local to their computer — it's not a website anyone else can see.
+Tell the user to open http://localhost:5001 in their browser. Explain that this address is local to their computer — it's not a website anyone else can see.
 
-### 8. Walk them through first use
+---
 
-- **Replies tab** — replies to their Notes and comments. Hit **Sync** to fetch activity. The first sync may take several minutes while the database builds — this is normal.
-- **Publication tabs** — comments on their own posts. Hit **Load posts** first, then **Sync** for ongoing updates.
-- **Liked toggle** — when on, liked replies move to a collapsed "handled" section.
-- **Search** — filters across all tabs simultaneously.
+**Step 9: First use.** Walk them through what they're looking at:
+
+- **Replies tab** — replies to their Substack Notes and comments. Hit **Sync** to fetch their activity. The first sync builds the database and may take several minutes — this is normal.
+- **Publication tabs** — comments on their own posts. Hit **Load posts** first to pull them in, then **Sync** for ongoing updates.
+- **Liked toggle** — when on, items you've liked on Substack move to a collapsed "handled" section instead of staying in your queue.
+- **Search** — filters across all tabs simultaneously by name, keyword, or phrase.
 
 ## Commands
 
