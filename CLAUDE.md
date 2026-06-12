@@ -17,41 +17,118 @@ If it's missing or expired:
 
 ## First-time setup (new user, no config.py)
 
-If `config.py` doesn't exist, the user needs to set it up. Once `SUBSTACK_SID` is set, Claude can look up all the values automatically — no manual digging needed.
+If `config.py` doesn't exist, follow these steps in order.
 
-Ask the user for their Substack handle and any publication subdomains they own, then run:
+### 1. Check prerequisites
+
+```bash
+python3 --version
+git --version
+```
+
+If Python 3 isn't installed, tell the user to download it from python.org and come back. On Mac, if Git isn't installed, `git --version` may trigger a prompt to install Xcode Command Line Tools — warn them it's safe.
+
+### 2. Fork or clone?
+
+Ask the user:
+
+> Quick question before we download the app: do you think you might want to customize it — change how it looks, what it tracks, how things are organized? Or do you just want to try it out as-is?
+>
+> - **Just try it out** → simple download, no GitHub account needed.
+> - **I want to customize it** → we'll set up your own copy on GitHub. You'll need a free GitHub account.
+
+**If just trying it out (clone):**
+
+```bash
+mkdir -p ~/Projects
+cd ~/Projects
+git clone https://github.com/alyssafuward/substack-replies.git
+cd substack-replies
+pip install -r requirements.txt
+```
+
+**If they want to customize (fork + clone):**
+
+If they don't have a GitHub account, tell them to create one at github.com. Then:
+
+1. Tell them to go to https://github.com/alyssafuward/substack-replies and click **Fork** → **Create fork**
+2. Ask for their GitHub username, then:
+
+```bash
+mkdir -p ~/Projects
+cd ~/Projects
+git clone https://github.com/THEIR-USERNAME/substack-replies.git
+cd substack-replies
+pip install -r requirements.txt
+```
+
+### 3. Get the Substack session cookie
+
+The user does this themselves — **do not have them paste the cookie value into chat**. Conversation content is sent to Anthropic's servers and the cookie is a live credential.
+
+Tell the user:
+
+> This is the one part I can't do for you. A session cookie is how your browser proves to Substack that you're logged in — we need it so the app can fetch your data. Don't share it with anyone, including me. I'll give you a command to store it safely on your machine.
+
+Walk them through finding it:
+1. Open [substack.com](https://substack.com) logged in
+2. Open DevTools: `Cmd+Option+I` (Mac) or `F12` (Windows)
+3. Click **Application** tab → **Cookies** → `https://substack.com`
+4. Find `substack.sid` and copy its value
+
+Give them this command to run in Terminal (they replace the placeholder with their value):
+
+```bash
+echo 'export SUBSTACK_SID="paste-your-value-here"' >> ~/.zshrc && source ~/.zshrc
+```
+
+Verify it took:
+
+```bash
+echo $SUBSTACK_SID
+```
+
+If it prints nothing, troubleshoot — they may be on a different shell (`echo $SHELL`).
+
+### 4. Look up their account details
+
+Once `SUBSTACK_SID` is set, fetch their user ID and handle automatically:
 
 ```python
-import requests, os, json
+import requests, os
 from urllib.parse import unquote
-
 sid = os.environ.get("SUBSTACK_SID", "")
 headers = {
     "Cookie": f"substack.sid={unquote(sid)}",
     "Accept": "application/json",
     "User-Agent": "Mozilla/5.0",
 }
-
-# Get user ID
 resp = requests.get("https://substack.com/api/v1/subscriber", headers=headers)
 data = resp.json()
-user_id = data.get("id") or data.get("user_id")
-handle = data.get("handle", "")
-print(f"USER_ID: {user_id}")
-print(f"HANDLE: {handle}")
+print(f"USER_ID: {data.get('id') or data.get('user_id')}")
+print(f"HANDLE: {data.get('handle', '')}")
 ```
 
-Then for each publication subdomain the user provides, fetch its ID:
+### 5. Get publication IDs
+
+Ask for the subdomain(s) of their Substack publication(s) — the part before `.substack.com`. For each one:
 
 ```python
-subdomain = "their-subdomain"  # replace with actual
+import requests, os
+from urllib.parse import unquote
+subdomain = "REPLACE_WITH_SUBDOMAIN"
+sid = os.environ.get("SUBSTACK_SID", "")
+headers = {
+    "Cookie": f"substack.sid={unquote(sid)}",
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0",
+}
 resp = requests.get(f"https://{subdomain}.substack.com/api/v1/publication", headers=headers)
-pub_data = resp.json()
-pub_id = pub_data.get("id")
-print(f"{subdomain}: {pub_id}")
+data = resp.json()
+print(f"{subdomain}: {data.get('id')}")
 ```
 
-Use the results to create `config.py`:
+### 6. Create config.py
 
 ```python
 USER_ID = <user_id>
@@ -63,7 +140,26 @@ OWN_PUBS = {
 }
 ```
 
-Then run `python check.py` to verify everything is working.
+### 7. Verify and run
+
+```bash
+python check.py
+```
+
+If any checks fail, diagnose before continuing. Then start the app:
+
+```bash
+python app.py
+```
+
+Tell the user to open http://localhost:5001. Explain that this is local to their computer — it's not a website anyone else can see.
+
+### 8. Walk them through first use
+
+- **Replies tab** — replies to their Notes and comments. Hit **Sync** to fetch activity. The first sync may take several minutes while the database builds — this is normal.
+- **Publication tabs** — comments on their own posts. Hit **Load posts** first, then **Sync** for ongoing updates.
+- **Liked toggle** — when on, liked replies move to a collapsed "handled" section.
+- **Search** — filters across all tabs simultaneously.
 
 ## Commands
 
