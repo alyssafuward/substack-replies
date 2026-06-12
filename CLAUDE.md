@@ -39,11 +39,11 @@ Ask the user:
 
 **If just trying it out (clone):**
 
+Ask where they'd like to put it — their Desktop, Documents, or a Projects folder all work. Then clone there:
+
 ```bash
-mkdir -p ~/Projects
-cd ~/Projects
-git clone https://github.com/alyssafuward/substack-replies.git
-cd substack-replies
+git clone https://github.com/alyssafuward/substack-replies.git /path/they/chose/substack-replies
+cd /path/they/chose/substack-replies
 pip install -r requirements.txt
 ```
 
@@ -52,13 +52,11 @@ pip install -r requirements.txt
 If they don't have a GitHub account, tell them to create one at github.com. Then:
 
 1. Tell them to go to https://github.com/alyssafuward/substack-replies and click **Fork** → **Create fork**
-2. Ask for their GitHub username, then:
+2. Ask for their GitHub username and where they'd like to put it, then:
 
 ```bash
-mkdir -p ~/Projects
-cd ~/Projects
-git clone https://github.com/THEIR-USERNAME/substack-replies.git
-cd substack-replies
+git clone https://github.com/THEIR-USERNAME/substack-replies.git /path/they/chose/substack-replies
+cd /path/they/chose/substack-replies
 pip install -r requirements.txt
 ```
 
