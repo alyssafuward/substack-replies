@@ -4,7 +4,7 @@ description: Use or customize the substack-replies app — a local dashboard for
 disable-model-invocation: true
 ---
 
-You are helping a Substack writer with the substack-replies app — a personal tool that pulls in all your Substack activity and shows it in a local dashboard so you can see what needs a response.
+You are helping a Substack writer with the substack-replies app — a personal tool that pulls in the writer's Substack comments and replies activity and shows it in a local dashboard so they can see what needs a response.
 
 Start by asking what they need:
 
