@@ -44,13 +44,17 @@ This is not a managed service. It runs locally on your computer, stores your dat
 
 ## Getting started
 
-**[Download the setup skill](https://raw.githubusercontent.com/alyssafuward/substack-replies/main/setup-skill/SKILL.md)** — right-click and Save As, or click Raw and use your browser's save option. Drop it in your Downloads folder. Then open Claude Code and say:
+**[Read the setup guide](SETUP.md)** — it walks you through everything. The short version:
 
-> "Install the setup skill from my Downloads folder"
+1. Install [Claude Code](https://claude.ai/code) if you haven't already
+2. Open Terminal, type `claude`, and press Enter
+3. Paste this into the Claude conversation:
 
-Claude will walk you through everything: installing Python if needed, getting a copy of the code, setting up a GitHub account if you want one, getting your Substack credentials, configuring the app, and verifying it all works before you run it for the first time.
+> I want to set up this Substack replies tool: https://github.com/alyssafuward/substack-replies — can you clone it, install what's needed, and walk me through the setup?
 
-**A note on Terminal.** Claude Code runs inside Terminal. If you haven't used it before — on a Mac, press `Cmd+Space`, type "Terminal", and hit enter. One thing that trips people up: Terminal is keyboard-only. You can't click to reposition your cursor inside a command the way you would in a text editor. Use the arrow keys to move around and edit. Claude will give you exact commands to run, so mostly you'll just be pasting (`Cmd+V`) and hitting enter.
+Claude will ask whether you want to just try the app or create your own copy on GitHub, then handle the download, dependencies, and configuration for you.
+
+**A note on Terminal.** Claude Code runs inside Terminal. If you haven't used it before — on a Mac, press `Cmd+Space`, type "Terminal", and hit enter. One thing that trips people up: Terminal is keyboard-only. You can't click to reposition your cursor inside a command. Use the arrow keys to move around and edit. Claude will give you exact commands to run, so mostly you'll just be pasting (`Cmd+V`) and hitting enter.
 
 ---
 
