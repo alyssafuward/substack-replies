@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    from config import USER_ID, OWN_PUBS
+    from config import USER_ID, OWN_PUBS, HANDLE
 except ImportError:
     print("Error: config.py not found. Copy config.example.py to config.py and fill in your values.")
     sys.exit(1)
@@ -28,35 +28,121 @@ def _comment_link(post_url, comment_id):
 
 
 # ── Data ──────────────────────────────────────────────────────────────────────
+#
+# The loaders below batch what used to be per-row queries (one LIKE scan or
+# id lookup per activity item / comment) into a handful of queries per page
+# load, using preloaded in-memory indexes for the per-item checks. See #63.
 
-def load_thread(conn, reply_id):
-    """Return ancestor comments in order (oldest first), excluding the reply itself."""
-    row = conn.execute("SELECT ancestor_path FROM comments WHERE id=?", (reply_id,)).fetchone()
-    if not row or not row[0]:
-        return []
-    ancestor_ids = [int(x) for x in row[0].split(".") if x]
-    if not ancestor_ids:
-        return []
-    placeholders = ",".join("?" * len(ancestor_ids))
-    rows = conn.execute(
-        f"SELECT id, name, body, post_url, handle FROM comments WHERE id IN ({placeholders})", ancestor_ids
+def _load_own_replies(conn):
+    """Index of {ancestor_id: [(own_comment_id, own_comment_body), ...]} for
+    every comment USER_ID has made that is itself a reply — built by
+    splitting each reply's dot-delimited ancestor_path into its component
+    ids. Preloaded once per request so "has the user already replied
+    somewhere under X" is an O(1) dict lookup instead of a per-item LIKE
+    query (which can't use an index and does a full table scan every time)."""
+    rows = conn.execute("""
+        SELECT id, ancestor_path, body FROM comments
+        WHERE user_id=? AND ancestor_path IS NOT NULL AND ancestor_path != ''
+    """, (USER_ID,)).fetchall()
+    index = {}
+    for oid, path, body in rows:
+        for part in path.split("."):
+            if not part:
+                continue
+            try:
+                aid = int(part)
+            except ValueError:
+                continue
+            index.setdefault(aid, []).append((oid, body))
+    return index
+
+
+def _load_own_comment_ids(conn):
+    """Every comment id authored by USER_ID, for O(1) 'is this ancestor mine' checks."""
+    return {r[0] for r in conn.execute("SELECT id FROM comments WHERE user_id=?", (USER_ID,)).fetchall()}
+
+
+def _replied_after(own_replies_index, reply_id):
+    """Is there a reply of yours, later than reply_id, somewhere under it."""
+    return any(oid > reply_id for oid, _body in own_replies_index.get(reply_id, ()))
+
+
+def _reply_back_body(own_replies_index, reply_id):
+    """Body of your earliest reply, later than reply_id, under it."""
+    matches = [(oid, body) for oid, body in own_replies_index.get(reply_id, ()) if oid > reply_id]
+    if not matches:
+        return ""
+    matches.sort(key=lambda x: x[0])
+    return matches[0][1] or ""
+
+
+def _replied_under(own_replies_index, cid):
+    """Have you replied anywhere under cid."""
+    return cid in own_replies_index
+
+
+def _fetch_comments_by_id(conn, ids):
+    """Batch fetch of {id: (name, handle, body, post_id, post_url, raw_json)}."""
+    ids = list({i for i in ids if i})
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = conn.execute(f"""
+        SELECT id, name, handle, body, post_id, post_url, raw_json
+        FROM comments WHERE id IN ({placeholders})
+    """, ids).fetchall()
+    return {r[0]: r[1:] for r in rows}
+
+
+def _load_threads_batch(conn, ids):
+    """Return {id: thread} for many reply ids in at most 2 queries total,
+    instead of load_thread's 2 queries times N calls."""
+    ids = list({i for i in ids if i})
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    path_rows = conn.execute(
+        f"SELECT id, ancestor_path FROM comments WHERE id IN ({placeholders})", ids
     ).fetchall()
-    by_id = {r[0]: r for r in rows}
-    result = []
-    for i in ancestor_ids:
-        if i not in by_id:
-            continue
-        _, name, body, post_url, handle = by_id[i]
-        link = _comment_link(post_url, i)
-        if not link and handle:
-            link = f"https://substack.com/@{handle}/note/c-{i}"
-        result.append({"id": i, "name": name or "?", "body": body or "", "link": link})
-    return result
+    paths = dict(path_rows)
+
+    parsed = {}
+    all_ancestor_ids = set()
+    for rid in ids:
+        path = paths.get(rid)
+        ancestor_ids = [int(x) for x in path.split(".") if x] if path else []
+        parsed[rid] = ancestor_ids
+        all_ancestor_ids.update(ancestor_ids)
+
+    by_id = {}
+    if all_ancestor_ids:
+        a_list = list(all_ancestor_ids)
+        a_placeholders = ",".join("?" * len(a_list))
+        rows = conn.execute(
+            f"SELECT id, name, body, post_url, handle FROM comments WHERE id IN ({a_placeholders})", a_list
+        ).fetchall()
+        by_id = {r[0]: r for r in rows}
+
+    threads = {}
+    for rid in ids:
+        thread = []
+        for aid in parsed[rid]:
+            if aid not in by_id:
+                continue
+            _, name, body, post_url, handle = by_id[aid]
+            link = _comment_link(post_url, aid)
+            if not link and handle:
+                link = f"https://substack.com/@{handle}/note/c-{aid}"
+            thread.append({"id": aid, "name": name or "?", "body": body or "", "link": link})
+        threads[rid] = thread
+    return threads
 
 
 def load_data(conn):
     """Return list of dicts representing replies needing response."""
     results = []
+    own_replies = _load_own_replies(conn)
+    own_comment_ids = _load_own_comment_ids(conn)
 
     # 1. Note/comment replies from activity feed
     rows = conn.execute("""
@@ -67,30 +153,25 @@ def load_data(conn):
         ORDER BY a.created_at DESC
     """).fetchall()
 
+    candidates = []
     for row in rows:
         item_id, item_type, created_at, reply_id, your_id, raw, is_responded = row
         if not reply_id or (not your_id and item_type != 'comment_mention'):
             continue
-
-        # Check if you already replied back (recheck flag or response comment in DB)
         if is_responded:
             continue
-        your_reply = conn.execute("""
-            SELECT id FROM comments
-            WHERE user_id = ? AND ancestor_path LIKE ? AND id > ?
-        """, (USER_ID, f"%{reply_id}%", reply_id)).fetchone()
-        if your_reply:
+        if _replied_after(own_replies, reply_id):
             continue
+        candidates.append((item_type, created_at, reply_id, your_id))
 
-        reply_row = conn.execute(
-            "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
-        ).fetchone()
-        your_row = conn.execute(
-            "SELECT body FROM comments WHERE id=?", (your_id,)
-        ).fetchone() if your_id else None
+    comment_rows = _fetch_comments_by_id(conn, [c[2] for c in candidates] + [c[3] for c in candidates if c[3]])
+    threads = _load_threads_batch(conn, [c[2] for c in candidates])
 
+    for item_type, created_at, reply_id, your_id in candidates:
+        reply_row = comment_rows.get(reply_id)
         if not reply_row:
             continue
+        your_row = comment_rows.get(your_id) if your_id else None
 
         name = reply_row[0] or reply_row[1] or "Someone"
         reply_handle = reply_row[1] or ""
@@ -98,7 +179,7 @@ def load_data(conn):
         post_id = reply_row[3]
         post_url = reply_row[4]
         reply_raw = json.loads(reply_row[5] or "{}")
-        your_body = your_row[0] if your_row else ""
+        your_body = your_row[2] if your_row else ""
         if item_type == "note_reply":
             label = "replied to your note"
         elif item_type == "comment_mention":
@@ -116,7 +197,7 @@ def load_data(conn):
         else:
             link = ""
 
-        thread = load_thread(conn, reply_id)
+        thread = threads.get(reply_id, [])
         guest_post = bool(post_url) and not any(f"{sub}.substack.com" in post_url for sub in OWN_PUBS)
 
         results.append({
@@ -138,7 +219,7 @@ def load_data(conn):
     # 2. Unresponded comments on own posts
     rows = conn.execute("""
         SELECT c.id, c.name, c.handle, c.body, c.date,
-               c.post_title, c.post_url, c.ancestor_path, c.post_id
+               c.post_title, c.post_url, c.ancestor_path, c.post_id, c.raw_json
         FROM comments c
         WHERE c.pub_subdomain IS NOT NULL
           AND c.user_id != ?
@@ -146,36 +227,31 @@ def load_data(conn):
         ORDER BY c.date DESC
     """, (USER_ID,)).fetchall()
 
+    own_pub_candidates = []
     for row in rows:
-        cid, name, handle, body, date, post_title, post_url, ancestor_path, post_id = row
+        cid, name, handle, body, date, post_title, post_url, ancestor_path, post_id, raw_json_str = row
 
-        your_reply = conn.execute("""
-            SELECT id FROM comments
-            WHERE user_id = ? AND (ancestor_path = ? OR ancestor_path LIKE ?)
-        """, (USER_ID, str(cid), f"%.{cid}%")).fetchone()
-        if your_reply:
+        if _replied_under(own_replies, cid):
             continue
 
         if ancestor_path:
             ancestor_ids = [int(x) for x in ancestor_path.split(".") if x]
-            if ancestor_ids:
-                your_in_thread = conn.execute(
-                    f"SELECT id FROM comments WHERE user_id=? AND id IN ({','.join('?'*len(ancestor_ids))})",
-                    [USER_ID] + ancestor_ids
-                ).fetchone()
-                if not your_in_thread:
-                    continue
+            if ancestor_ids and not any(a in own_comment_ids for a in ancestor_ids):
+                continue
 
+        own_pub_candidates.append((cid, name, handle, body, date, post_title, post_url, raw_json_str))
+
+    threads = _load_threads_batch(conn, [c[0] for c in own_pub_candidates])
+
+    for cid, name, handle, body, date, post_title, post_url, raw_json_str in own_pub_candidates:
         link = post_url or ""
         if link and cid:
             link = f"{link.rstrip('/')}/comment/{cid}"
 
-        # Check if you liked this comment
-        liked_row = conn.execute("SELECT raw_json FROM comments WHERE id=?", (cid,)).fetchone()
-        liked_raw = json.loads(liked_row[0] or "{}") if liked_row else {}
+        liked_raw = json.loads(raw_json_str or "{}")
         liked = bool(liked_raw.get("reaction"))
 
-        thread = load_thread(conn, cid)
+        thread = threads.get(cid, [])
 
         results.append({
             "source": "own_pub",
@@ -195,29 +271,34 @@ def load_data(conn):
     return results
 
 
-def load_responded_data(conn):
-    """Return activity reply items where you have responded."""
+def _load_activity_replies(conn, filter_clause, include_reply_back):
+    """Shared by load_responded_data / load_archived_data — same shape query,
+    different WHERE clause and (for responded) an extra reply-back lookup."""
     results = []
-    rows = conn.execute("""
+    own_replies = _load_own_replies(conn) if include_reply_back else None
+    rows = conn.execute(f"""
         SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
         FROM activity_items a
         WHERE a.type IN ('note_reply', 'comment_reply', 'comment_mention')
-          AND a.is_responded = 1
+          AND {filter_clause}
         ORDER BY a.created_at DESC
     """).fetchall()
 
+    candidates = []
     for row in rows:
         item_id, item_type, created_at, reply_id, your_id, raw = row
         if not reply_id or (not your_id and item_type != 'comment_mention'):
             continue
+        candidates.append((item_type, created_at, reply_id, your_id))
 
-        reply_row = conn.execute(
-            "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
-        ).fetchone()
-        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone() if your_id else None
+    comment_rows = _fetch_comments_by_id(conn, [c[2] for c in candidates] + [c[3] for c in candidates if c[3]])
+    threads = _load_threads_batch(conn, [c[2] for c in candidates])
 
+    for item_type, created_at, reply_id, your_id in candidates:
+        reply_row = comment_rows.get(reply_id)
         if not reply_row:
             continue
+        your_row = comment_rows.get(your_id) if your_id else None
 
         name = reply_row[0] or reply_row[1] or "Someone"
         reply_handle = reply_row[1] or ""
@@ -225,21 +306,13 @@ def load_responded_data(conn):
         post_id = reply_row[3]
         post_url = reply_row[4]
         reply_raw = json.loads(reply_row[5] or "{}")
-        your_body = your_row[0] if your_row else ""
+        your_body = your_row[2] if your_row else ""
         if item_type == "note_reply":
             label = "replied to your note"
         elif item_type == "comment_mention":
             label = "mentioned you in a note"
         else:
             label = "replied to your comment"
-
-        # Find your reply back to this person
-        reply_back_row = conn.execute("""
-            SELECT body FROM comments
-            WHERE user_id = ? AND ancestor_path LIKE ? AND id > ?
-            ORDER BY id LIMIT 1
-        """, (USER_ID, f"%{reply_id}%", reply_id)).fetchone()
-        your_reply_back = reply_back_row[0] if reply_back_row else ""
 
         if item_type in ("note_reply", "comment_mention") and reply_handle:
             link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
@@ -250,9 +323,9 @@ def load_responded_data(conn):
         else:
             link = ""
 
-        thread = load_thread(conn, reply_id)
+        thread = threads.get(reply_id, [])
 
-        results.append({
+        entry = {
             "source": "activity",
             "date": (created_at or "")[:10],
             "raw_date": created_at or "",
@@ -261,81 +334,26 @@ def load_responded_data(conn):
             "label": label,
             "your_body": your_body,
             "their_body": reply_body,
-            "your_reply_back": your_reply_back,
             "link": link,
             "comment_id": reply_id,
             "liked": bool(reply_raw.get("reaction")),
             "thread": thread,
-        })
+        }
+        if include_reply_back:
+            entry["your_reply_back"] = _reply_back_body(own_replies, reply_id)
+        results.append(entry)
 
     return results
+
+
+def load_responded_data(conn):
+    """Return activity reply items where you have responded."""
+    return _load_activity_replies(conn, "a.is_responded = 1", include_reply_back=True)
 
 
 def load_archived_data(conn):
     """Return activity reply items that have been archived."""
-    results = []
-    rows = conn.execute("""
-        SELECT a.id, a.type, a.created_at, a.comment_id, a.target_comment_id, a.raw_json
-        FROM activity_items a
-        WHERE a.type IN ('note_reply', 'comment_reply', 'comment_mention')
-          AND a.is_archived = 1
-        ORDER BY a.created_at DESC
-    """).fetchall()
-
-    for row in rows:
-        item_id, item_type, created_at, reply_id, your_id, raw = row
-        if not reply_id or (not your_id and item_type != 'comment_mention'):
-            continue
-
-        reply_row = conn.execute(
-            "SELECT name, handle, body, post_id, post_url, raw_json FROM comments WHERE id=?", (reply_id,)
-        ).fetchone()
-        your_row = conn.execute("SELECT body FROM comments WHERE id=?", (your_id,)).fetchone() if your_id else None
-
-        if not reply_row:
-            continue
-
-        name = reply_row[0] or reply_row[1] or "Someone"
-        reply_handle = reply_row[1] or ""
-        reply_body = reply_row[2] or ""
-        post_id = reply_row[3]
-        post_url = reply_row[4]
-        reply_raw = json.loads(reply_row[5] or "{}")
-        your_body = your_row[0] if your_row else ""
-        if item_type == "note_reply":
-            label = "replied to your note"
-        elif item_type == "comment_mention":
-            label = "mentioned you in a note"
-        else:
-            label = "replied to your comment"
-
-        if item_type in ("note_reply", "comment_mention") and reply_handle:
-            link = f"https://substack.com/@{reply_handle}/note/c-{reply_id}"
-        elif post_url:
-            link = f"{post_url.rstrip('/')}/comment/{reply_id}"
-        elif post_id:
-            link = f"https://substack.com/p/{post_id}/comment/{reply_id}"
-        else:
-            link = ""
-
-        thread = load_thread(conn, reply_id)
-
-        results.append({
-            "source": "activity",
-            "date": (created_at or "")[:10],
-            "raw_date": created_at or "",
-            "who": name,
-            "handle": reply_handle,
-            "label": label,
-            "your_body": your_body,
-            "their_body": reply_body,
-            "link": link,
-            "comment_id": reply_id,
-            "liked": bool(reply_raw.get("reaction")),
-            "thread": thread,
-        })
-
-    return results
+    return _load_activity_replies(conn, "a.is_archived = 1", include_reply_back=False)
 
 
 def _format_sync_time(iso_str):
@@ -388,10 +406,22 @@ def load_stats(conn):
         "gap_warning": gap_warning,
     }
 
+def _own_reply_body_under(own_replies_index, cid):
+    """Body of your earliest reply under cid. (If you replied more than once
+    to the same commenter, which one showed here was previously undefined —
+    the original query had no ORDER BY — so this picks deterministically.)"""
+    matches = own_replies_index.get(cid)
+    if not matches:
+        return ""
+    return min(matches, key=lambda m: m[0])[1] or ""
+
+
 def load_post_comments_data(conn, pub_subdomain):
     """Return loaded posts with their unanswered/liked comments for Tab 2."""
     if not pub_subdomain:
         return []
+
+    own_replies = _load_own_replies(conn)
 
     posts = conn.execute("""
         SELECT id, title, canonical_url, post_date
@@ -413,11 +443,6 @@ def load_post_comments_data(conn, pub_subdomain):
         responded_list = []
 
         for cid, name, handle, body, date, raw_json_str in comment_rows:
-            your_reply = conn.execute("""
-                SELECT id, body FROM comments
-                WHERE user_id=? AND (ancestor_path=? OR ancestor_path LIKE ?)
-            """, (USER_ID, str(cid), f"%.{cid}%")).fetchone()
-
             raw = json.loads(raw_json_str or "{}")
             is_liked = bool(raw.get("reaction"))
             link = f"{url.rstrip('/')}/comment/{cid}" if url else ""
@@ -432,8 +457,8 @@ def load_post_comments_data(conn, pub_subdomain):
                 "liked": is_liked,
             }
 
-            if your_reply:
-                c["your_reply"] = your_reply[1] or ""
+            if _replied_under(own_replies, cid):
+                c["your_reply"] = _own_reply_body_under(own_replies, cid)
                 responded_list.append(c)
                 continue
 
@@ -453,6 +478,47 @@ def load_post_comments_data(conn, pub_subdomain):
         })
 
     return result
+
+
+NOTES_RENDER_LIMIT = 200
+
+
+def load_notes_data(conn, limit=NOTES_RENDER_LIMIT):
+    """Return your authored Notes: standalone notes and replies you made in others' note threads.
+    Notes are stored in the comments table with post_id/pub_subdomain NULL, since they
+    aren't tied to a post; populated by `scraper.py sync` via sync_my_notes().
+
+    Capped at `limit` most-recent rows per section — with history fully backfilled
+    this table can hold thousands of rows, and rendering all of them into every
+    page load (regardless of which tab is active) is what made the page huge and
+    slow. Only the most recent `limit` of each render; older ones stay in the DB."""
+
+    def fetch(ancestor_clause):
+        rows = conn.execute(f"""
+            SELECT id, body, date, raw_json
+            FROM comments
+            WHERE user_id=? AND post_id IS NULL AND pub_subdomain IS NULL AND {ancestor_clause}
+            ORDER BY date DESC
+            LIMIT ?
+        """, (USER_ID, limit)).fetchall()
+        notes = []
+        for cid, body, date, raw_json_str in rows:
+            raw = json.loads(raw_json_str or "{}")
+            notes.append({
+                "id": cid,
+                "body": body or "",
+                "date": (date or "")[:10],
+                "raw_date": date or "",
+                "link": f"https://substack.com/@{HANDLE}/note/c-{cid}",
+                "reaction_count": raw.get("reaction_count") or 0,
+                "restacks": raw.get("restacks") or 0,
+            })
+        return notes
+
+    standalone = fetch("(ancestor_path IS NULL OR ancestor_path = '')")
+    thread_replies = fetch("ancestor_path IS NOT NULL AND ancestor_path != ''")
+
+    return {"standalone": standalone, "thread_replies": thread_replies}
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -686,11 +752,75 @@ def render_post_comments_tab(posts_data, pub_subdomain, liked_acknowledged=True)
   {empty_html}"""
 
 
-def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None, liked_acknowledged=True):
+def render_note_card(n):
+    date = escape(format_date(n.get("raw_date", n["date"])))
+    LIMIT = 220
+    raw_body = n["body"]
+    if len(raw_body) <= LIMIT:
+        body_html = escape(raw_body)
+    else:
+        short = escape(raw_body[:LIMIT])
+        full = escape(raw_body)
+        body_html = f'<span class="thread-short">{short}<button class="thread-more" onclick="expandThread(this)">… more</button></span><span class="thread-full" style="display:none">{full}<button class="thread-more" onclick="collapseThread(this)"> less</button></span>'
+    link = n.get("link", "")
+    meta_bits = []
+    if n.get("reaction_count"):
+        meta_bits.append(f"❤️ {n['reaction_count']}")
+    if n.get("restacks"):
+        meta_bits.append(f"🔁 {n['restacks']}")
+    meta_html = f'<span class="liked-badge">{" · ".join(meta_bits)}</span>' if meta_bits else ""
+    link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open →</a>' if link else ""
+
+    return f"""    <div class="post-comment-card" data-date="{n.get('date','')}">
+      <div class="card-header">
+        <div class="card-meta">{meta_html}<span class="date">{date}</span></div>
+        <div class="card-actions">{link_html}</div>
+      </div>
+      <div class="their-content">{body_html}</div>
+    </div>"""
+
+
+def render_notes_tab(notes_data):
+    standalone = notes_data.get("standalone", [])
+    thread_replies = notes_data.get("thread_replies", [])
+
+    if not standalone and not thread_replies:
+        return """  <div class="posts-controls">
+    <div style="font-size:0.82rem; color:#888;">Notes are pulled in automatically whenever you hit Sync on the Replies tab.</div>
+  </div>
+  <div class="empty" style="margin-top:40px;">No Notes synced yet — click Sync on the Replies tab to fetch them.</div>"""
+
+    total = len(standalone)
+    banner_html = f'<div class="count-banner" style="margin-bottom:16px;">📝 <span id="notes-count">{total}</span> {"Note" if total == 1 else "Notes"} written</div>'
+    cards_html = "\n".join(render_note_card(n) for n in standalone)
+
+    replies_toggle = ""
+    if thread_replies:
+        replies_html = "\n".join(render_note_card(n) for n in thread_replies)
+        replies_toggle = f"""
+  <div class="toggle-section" id="notes-replies-toggle-wrap">
+    <button class="toggle-btn" onclick="toggleSection(this)">▶ Replies to others' notes (<span id="notes-replies-count">{len(thread_replies)}</span>)</button>
+    <div class="liked-section" id="notes-replies-section">
+      <div class="cards" id="notes-replies-cards">{replies_html}</div>
+    </div>
+  </div>"""
+
+    return f"""  <div class="posts-controls">
+    <div style="font-size:0.82rem; color:#888;">Notes are pulled in automatically whenever you hit Sync on the Replies tab.</div>
+  </div>
+  {banner_html}
+  <div class="cards" id="notes-cards">
+    {cards_html}
+  </div>
+  {replies_toggle}"""
+
+
+def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None, liked_acknowledged=True, notes_data=None):
     all_posts_data = all_posts_data or {}
     all_pubs = all_pubs or []
     responded_items = responded_items or []
     archived_items = archived_items or []
+    notes_data = notes_data or {"standalone": [], "thread_replies": []}
 
     if liked_acknowledged:
         needs_response = [i for i in items if not i.get("liked") and i.get("source") != "own_pub"]
@@ -904,7 +1034,15 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       font-family: 'DM Sans', sans-serif;
     }}
     input[type="text"]:focus, input[type="date"]:focus {{ outline: none; border-color: #1F6FA8 !important; box-shadow: 0 0 0 2px rgba(31,111,168,0.12); }}
-    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    @keyframes envelope-fly {{
+      0%   {{ transform: translate(-40px, 0) rotate(0deg); opacity: 0; }}
+      10%  {{ opacity: 1; }}
+      40%  {{ transform: translate(80px, 0) rotate(0deg); }}
+      55%  {{ transform: translate(115px, -50px) rotate(180deg); }}
+      70%  {{ transform: translate(150px, 0) rotate(360deg); }}
+      90%  {{ opacity: 1; }}
+      100% {{ transform: translate(240px, 0) rotate(360deg); opacity: 0; }}
+    }}
   </style>
 </head>
 <body>
@@ -949,12 +1087,15 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
   </div>
 
   <div id="page-loading" style="display:none; position:fixed; inset:0; background:rgba(242,248,253,0.85); z-index:9999; display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px;">
-    <div style="width:28px; height:28px; border:3px solid #D8ECF8; border-top-color:#1F6FA8; border-radius:50%; animation:spin 0.7s linear infinite;"></div>
+    <div style="width:240px; height:90px; overflow:hidden; position:relative;">
+      <div style="position:absolute; top:55px; left:0; font-size:28px; line-height:32px; animation:envelope-fly 3s ease-in-out infinite;">✉️</div>
+    </div>
     <div style="font-size:0.85rem; color:#666;">Reloading…</div>
   </div>
 
   <div class="tab-nav">
     <button class="tab-btn" id="tab-btn-replies" data-label="Replies" onclick="switchTab('replies')">Replies</button>
+    <button class="tab-btn" id="tab-btn-notes" data-label="Notes" onclick="switchTab('notes')">Notes</button>
     {pub_tabs_html}
   </div>
 
@@ -998,12 +1139,17 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     {"<div class='toggle-section' id='archived-toggle-wrap'><button class='toggle-btn' onclick='toggleArchived(this)'>▶ Archived (<span id='archived-count'>" + str(archived_count) + "</span>)</button><div class='liked-section' id='archived-section'><div class='cards' id='archived-cards'>" + archived_cards + "</div></div></div>" if archived_count else ""}
   </div>
 
+  <div id="tab-content-notes" style="display:none">
+    {render_notes_tab(notes_data)}
+  </div>
+
   {pub_contents_html}
 
   <script>
     const initTab = "{active_tab}";
 
     const allPubs = {json.dumps(all_pubs)};
+    const allTabs = allPubs.concat(['notes']);
 
     function showReloadOverlay() {{
       const overlay = document.getElementById('page-loading');
@@ -1020,7 +1166,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     function switchTab(tab) {{
       // Hide all tabs
       document.getElementById('tab-replies').style.display = 'none';
-      allPubs.forEach(p => {{
+      allTabs.forEach(p => {{
         const el = document.getElementById('tab-content-' + p);
         if (el) el.style.display = 'none';
         const btn = document.getElementById('tab-btn-' + p);
@@ -1314,6 +1460,17 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }});
 
       setTabLabel('replies', hasFilter ? repliesTotal : null);
+
+      // ── Notes tab ──
+      {{
+        let notesTotal = 0;
+        document.querySelectorAll('#notes-cards .post-comment-card, #notes-replies-cards .post-comment-card').forEach(card => {{
+          const show = cardMatches(card, '', keyQ, dateFrom, dateTo);
+          card.style.display = show ? '' : 'none';
+          if (show) notesTotal++;
+        }});
+        setTabLabel('notes', hasFilter ? notesTotal : null);
+      }}
 
       // ── Pub tabs ──
       allPubs.forEach(pub => {{

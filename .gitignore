@@ -1,6 +1,7 @@
 replies.db*
 .env
 config.py
+*.bak
 *.json
 __pycache__/
 *.pyc

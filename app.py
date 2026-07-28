@@ -17,7 +17,7 @@ import threading
 from pathlib import Path
 from flask import Flask, Response, request, redirect, jsonify
 
-from dashboard import load_data, load_stats, load_post_comments_data, load_responded_data, load_archived_data, render_html
+from dashboard import load_data, load_stats, load_post_comments_data, load_responded_data, load_archived_data, load_notes_data, render_html
 from scraper import init_db, load_next_post, refresh_post_comments
 from insights import load_all as load_insights, render_insights_html, search_commenter
 
@@ -134,7 +134,7 @@ def sync_status():
 
 @app.route("/sync")
 def sync():
-    count = request.args.get("count", 250, type=int)
+    count = request.args.get("count", 150, type=int)
     cmd = [sys.executable, "-u", "scraper.py", "sync", "--count", str(count)]
     return Response(_stream(cmd), mimetype="text/event-stream", headers=_SSE_HEADERS)
 
@@ -211,9 +211,17 @@ def insights():
 
 @app.route("/")
 def index():
+    """Returns instantly with a loading shell, which immediately fetches the
+    real dashboard from /dashboard-data and swaps it in — so there's visible
+    feedback the moment the page opens, rather than a blank tab while the
+    server does its (still not instant, for a big history) work."""
     if not DB_PATH.exists():
         return Response(render_empty(), mimetype="text/html")
+    return Response(render_loading_shell(), mimetype="text/html")
 
+
+@app.route("/dashboard-data")
+def dashboard_data():
     from config import OWN_PUBS
     all_pubs = list(OWN_PUBS.keys())
     active_tab = request.args.get("tab", "replies")
@@ -225,13 +233,53 @@ def index():
         all_posts_data = {pub: load_post_comments_data(conn, pub) for pub in all_pubs}
         responded_items = load_responded_data(conn)
         archived_items = load_archived_data(conn)
+        notes_data = load_notes_data(conn)
 
     html = render_html(items, stats, all_posts_data=all_posts_data,
                        active_tab=active_tab, all_pubs=all_pubs,
                        responded_items=responded_items,
                        archived_items=archived_items,
-                       liked_acknowledged=liked_ack)
+                       liked_acknowledged=liked_ack,
+                       notes_data=notes_data)
     return Response(html, mimetype="text/html")
+
+
+def render_loading_shell():
+    return """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Substack Replies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+         background: #F2F8FD; color: #1A1A1A; height: 100vh; margin: 0;
+         display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
+  .loading-title { font-family: 'DM Serif Display', Georgia, serif; font-size: 1.4rem; }
+  @keyframes envelope-fly {
+    0%   { transform: translate(-40px, 0) rotate(0deg); opacity: 0; }
+    10%  { opacity: 1; }
+    40%  { transform: translate(80px, 0) rotate(0deg); }
+    55%  { transform: translate(115px, -50px) rotate(180deg); }
+    70%  { transform: translate(150px, 0) rotate(360deg); }
+    90%  { opacity: 1; }
+    100% { transform: translate(240px, 0) rotate(360deg); opacity: 0; }
+  }
+</style></head>
+<body>
+  <div class="loading-title">Substack Replies</div>
+  <div style="width:240px; height:90px; overflow:hidden; position:relative;">
+    <div style="position:absolute; top:55px; left:0; font-size:28px; line-height:32px; animation:envelope-fly 3s ease-in-out infinite;">✉️</div>
+  </div>
+  <div style="font-size:0.85rem; color:#666;">Loading your replies…</div>
+  <script>
+    fetch('/dashboard-data' + window.location.search)
+      .then(r => r.text())
+      .then(html => { document.open(); document.write(html); document.close(); })
+      .catch(() => {
+        document.body.innerHTML = '<p>Something went wrong loading the dashboard. <a href="' + window.location.href + '">Try again</a>.</p>';
+      });
+  </script>
+</body></html>"""
 
 
 def render_empty():
@@ -267,8 +315,7 @@ def render_empty():
         <option value="25" selected>25</option>
         <option value="50">50</option>
         <option value="100">100</option>
-        <option value="200">200</option>
-        <option value="250">250</option>
+        <option value="150">150</option>
       </select>
       <button class="sync-btn" id="sync-btn" onclick="startSync()">Sync</button>
       <button class="sync-btn" id="stop-btn" onclick="stopSync()" style="display:none; background:#888;">Stop</button>
