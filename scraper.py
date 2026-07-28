@@ -557,38 +557,54 @@ def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_l
     return new_items, new_unresponded, oldest_ts
 
 
-def sync_my_notes(conn):
+def sync_my_notes(conn, target=None, after_cursor=None, set_last_synced=None, stop_on_empty=False):
     """
-    Fetch all Notes authored by the user via the profile feed API
+    Fetch Notes authored by the user via the profile feed API
     (https://substack.com/api/v1/reader/feed/profile/{USER_ID}), storing each
     in the comments table (post_id/pub_subdomain NULL, since notes aren't tied
     to a post).
 
-    Uses a watermark (my_notes_last_synced_at) so repeat runs walk the feed
-    newest-first and stop as soon as they reach an already-synced note —
-    normally just page 1. The very first run has no watermark, so it walks
-    the full history instead, persisting progress (my_notes_backfill_cursor)
-    after each page so an interrupted backfill can resume where it left off.
+    Mirrors sync_activity_feed's two-cursor design:
+      - Forward pass (after_cursor=None): walks from the newest note down,
+        stopping at `my_notes_last_synced_at` (or `target`, or feed end).
+        Advances that watermark as it goes.
+      - Backfill pass (after_cursor=persisted my_notes_backfill_cursor):
+        resumes further back into history, capped at `target` per call so a
+        single sync can't walk unbounded — call again to go further back.
+
+    Both passes persist my_notes_backfill_cursor as they page, but only ever
+    move it further into the past. The cursor itself is an opaque token (not
+    a timestamp we can compare, unlike activity feed's), so a comparable date
+    (my_notes_backfill_anchor_date) is tracked alongside it purely to guard
+    direction — otherwise a quick forward pass could clobber deep backfill
+    progress from an earlier run.
+
+    Returns total notes stored/updated this call (for the caller to decide
+    whether a further backfill pass is needed).
     """
     url = f"https://substack.com/api/v1/reader/feed/profile/{USER_ID}"
     last_synced_at = get_state(conn, "my_notes_last_synced_at")
-    backfilling = last_synced_at is None
-    cursor = get_state(conn, "my_notes_backfill_cursor") if backfilling else None
+    should_update_last_synced = set_last_synced if set_last_synced is not None else (after_cursor is None)
 
+    cursor = after_cursor
     newest_seen = None
     total_stored = 0
     total_updated = 0
     page = 0
-    reached_watermark = False
+    consecutive_empty = 0
+    done = False
 
-    print(f"{ts()} Checking for new Notes...")
+    print(f"{ts()} Checking for Notes...")
 
-    while True:
+    while not done:
         data = get(url, {"cursor": cursor} if cursor else None)
         items = data.get("items", [])
         if not items:
+            print(f"{ts()}   Feed exhausted.")
             break
         page += 1
+        stored_this_page = 0
+        oldest_this_page = None
 
         for item in items:
             if item.get("context", {}).get("type") != "note":
@@ -598,10 +614,18 @@ def sync_my_notes(conn):
                 continue
 
             note_date = c.get("date", "")
-            if newest_seen is None or note_date > newest_seen:
+            if note_date and (oldest_this_page is None or note_date < oldest_this_page):
+                oldest_this_page = note_date
+            if note_date and (newest_seen is None or note_date > newest_seen):
                 newest_seen = note_date
-            if last_synced_at and note_date <= last_synced_at:
-                reached_watermark = True
+
+            # Stop when we reach already-synced territory (forward pass only).
+            # Compares against the watermark as it stood at the *start* of this
+            # call — never the accumulator above, or the very first item fetched
+            # would immediately look "already synced" against itself.
+            if after_cursor is None and last_synced_at and note_date and note_date <= last_synced_at:
+                print(f"{ts()}   Reached last sync point.")
+                done = True
                 break
 
             note_url = f"https://substack.com/@{HANDLE}/note/c-{c['id']}"
@@ -614,23 +638,47 @@ def sync_my_notes(conn):
                 _store_comment(conn, c, pub_subdomain=None, post_id=None,
                                post_title="Note", post_url=note_url)
                 total_stored += 1
+            stored_this_page += 1
+
+            if target is not None and (total_stored + total_updated) >= target:
+                print(f"{ts()}   Hit target of {target} notes.")
+                done = True
+                break
 
         conn.commit()
         print(f"{ts()}   page {page} — {total_stored} new, {total_updated} refreshed so far")
 
-        if reached_watermark:
+        if done:
             break
+
+        if stop_on_empty:
+            if stored_this_page == 0:
+                consecutive_empty += 1
+                if consecutive_empty >= 3:
+                    print(f"{ts()}   3 consecutive empty pages — fully synced to this point.")
+                    break
+            else:
+                consecutive_empty = 0
 
         next_cursor = data.get("nextCursor")
         if not next_cursor:
+            print(f"{ts()}   No more pages.")
             break
         cursor = next_cursor
-        if backfilling:
-            set_state(conn, "my_notes_backfill_cursor", cursor)
-            conn.commit()
+
+        # Persist backfill progress — only move backward (never forward).
+        if oldest_this_page:
+            current_anchor = get_state(conn, "my_notes_backfill_anchor_date")
+            if not current_anchor or oldest_this_page < current_anchor:
+                set_state(conn, "my_notes_backfill_cursor", cursor)
+                set_state(conn, "my_notes_backfill_anchor_date", oldest_this_page)
+        # Advance the forward watermark as we go, so a killed sync doesn't rescan from the top
+        if after_cursor is None and should_update_last_synced and newest_seen:
+            set_state(conn, "my_notes_last_synced_at", newest_seen)
+        conn.commit()
         time.sleep(1)
 
-    if newest_seen and (last_synced_at is None or newest_seen > last_synced_at):
+    if after_cursor is None and should_update_last_synced and newest_seen:
         set_state(conn, "my_notes_last_synced_at", newest_seen)
         conn.commit()
 
@@ -638,7 +686,7 @@ def sync_my_notes(conn):
         SELECT COUNT(*) FROM comments WHERE user_id=? AND post_id IS NULL AND pub_subdomain IS NULL
     """, (USER_ID,)).fetchone()[0]
     print(f"{ts()} Notes sync done: {total_stored} new, {total_updated} refreshed, {total_notes} total notes in DB")
-    return total_stored
+    return total_stored + total_updated
 
 
 def _store_comment(conn, c, pub_subdomain, post_id, post_title, post_url):
@@ -1112,7 +1160,7 @@ def main():
             args.discard(as_of_date)
 
     if not args:
-        print("Usage: python scraper.py [sync] [report] [my-notes] [load-post --pub X] [sync-posts --pub X] [--as-of YYYY-MM-DD]")
+        print("Usage: python scraper.py [sync] [report] [my-notes] [load-post --pub X] [sync-posts --pub X] [--as-of YYYY-MM-DD] [--count N]")
         sys.exit(0)
 
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
@@ -1139,7 +1187,14 @@ def main():
             refresh_post_comments(conn, pub)
 
         if "my-notes" in args:
-            sync_my_notes(conn)
+            notes_found = sync_my_notes(conn, target=count, set_last_synced=True)
+            if notes_found < count:
+                notes_cursor = get_state(conn, "my_notes_backfill_cursor")
+                if notes_cursor:
+                    remaining = count - notes_found
+                    print(f"{ts()} Backfilling Notes — need {remaining} more...")
+                    sync_my_notes(conn, target=remaining, after_cursor=notes_cursor,
+                                  set_last_synced=False, stop_on_empty=True)
 
         if "sync" in args:
             if as_of_date:
@@ -1153,8 +1208,16 @@ def main():
                 time.sleep(3)
                 still_unresponded += recheck_note_replies(conn)
 
-                # Step 2: fetch any Notes written since the last sync
-                sync_my_notes(conn)
+                # Step 2: fetch Notes — new since last sync, then backfill further
+                # into history if we haven't caught up to `count` yet this pass
+                notes_found = sync_my_notes(conn, target=count, set_last_synced=True)
+                if notes_found < count:
+                    notes_cursor = get_state(conn, "my_notes_backfill_cursor")
+                    if notes_cursor:
+                        remaining = count - notes_found
+                        print(f"{ts()} Backfilling Notes — need {remaining} more...")
+                        sync_my_notes(conn, target=remaining, after_cursor=notes_cursor,
+                                      set_last_synced=False, stop_on_empty=True)
 
                 # Step 3: always fetch a full target of new replies from new activity
                 new_items, new_unresponded = 0, 0
