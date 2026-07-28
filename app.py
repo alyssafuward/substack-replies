@@ -211,9 +211,17 @@ def insights():
 
 @app.route("/")
 def index():
+    """Returns instantly with a loading shell, which immediately fetches the
+    real dashboard from /dashboard-data and swaps it in — so there's visible
+    feedback the moment the page opens, rather than a blank tab while the
+    server does its (still not instant, for a big history) work."""
     if not DB_PATH.exists():
         return Response(render_empty(), mimetype="text/html")
+    return Response(render_loading_shell(), mimetype="text/html")
 
+
+@app.route("/dashboard-data")
+def dashboard_data():
     from config import OWN_PUBS
     all_pubs = list(OWN_PUBS.keys())
     active_tab = request.args.get("tab", "replies")
@@ -234,6 +242,44 @@ def index():
                        liked_acknowledged=liked_ack,
                        notes_data=notes_data)
     return Response(html, mimetype="text/html")
+
+
+def render_loading_shell():
+    return """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Substack Replies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+         background: #F2F8FD; color: #1A1A1A; height: 100vh; margin: 0;
+         display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
+  .loading-title { font-family: 'DM Serif Display', Georgia, serif; font-size: 1.4rem; }
+  @keyframes envelope-fly {
+    0%   { transform: translate(-40px, 0) rotate(0deg); opacity: 0; }
+    10%  { opacity: 1; }
+    40%  { transform: translate(80px, 0) rotate(0deg); }
+    55%  { transform: translate(115px, -50px) rotate(180deg); }
+    70%  { transform: translate(150px, 0) rotate(360deg); }
+    90%  { opacity: 1; }
+    100% { transform: translate(240px, 0) rotate(360deg); opacity: 0; }
+  }
+</style></head>
+<body>
+  <div class="loading-title">Substack Replies</div>
+  <div style="width:240px; height:90px; overflow:hidden; position:relative;">
+    <div style="position:absolute; top:55px; left:0; font-size:28px; line-height:32px; animation:envelope-fly 3s ease-in-out infinite;">✉️</div>
+  </div>
+  <div style="font-size:0.85rem; color:#666;">Loading your replies…</div>
+  <script>
+    fetch('/dashboard-data' + window.location.search)
+      .then(r => r.text())
+      .then(html => { document.open(); document.write(html); document.close(); })
+      .catch(() => {
+        document.body.innerHTML = '<p>Something went wrong loading the dashboard. <a href="' + window.location.href + '">Try again</a>.</p>';
+      });
+  </script>
+</body></html>"""
 
 
 def render_empty():
