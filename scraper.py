@@ -84,6 +84,7 @@ def init_db(conn):
             target_post_id INTEGER,
             is_new INTEGER,
             is_responded INTEGER DEFAULT 0,
+            is_archived INTEGER DEFAULT 0,
             raw_json TEXT
         );
 
@@ -128,11 +129,15 @@ def init_db(conn):
     # WAL mode: allows concurrent reads and writes between Flask and the scraper subprocess
     conn.execute("PRAGMA journal_mode=WAL")
 
-    # Migrate existing DB: add is_responded if it doesn't exist yet
-    try:
-        conn.execute("ALTER TABLE activity_items ADD COLUMN is_responded INTEGER DEFAULT 0")
-    except Exception:
-        pass  # column already exists
+    # Migrate existing DB: add columns introduced after the original CREATE TABLE
+    for ddl in (
+        "ALTER TABLE activity_items ADD COLUMN is_responded INTEGER DEFAULT 0",
+        "ALTER TABLE activity_items ADD COLUMN is_archived INTEGER DEFAULT 0",
+    ):
+        try:
+            conn.execute(ddl)
+        except Exception:
+            pass  # column already exists
 
     conn.commit()
 
