@@ -557,6 +557,90 @@ def sync_activity_feed(conn, target=UNRESPONDED_TARGET, after_cursor=None, set_l
     return new_items, new_unresponded, oldest_ts
 
 
+def sync_my_notes(conn):
+    """
+    Fetch all Notes authored by the user via the profile feed API
+    (https://substack.com/api/v1/reader/feed/profile/{USER_ID}), storing each
+    in the comments table (post_id/pub_subdomain NULL, since notes aren't tied
+    to a post).
+
+    Uses a watermark (my_notes_last_synced_at) so repeat runs walk the feed
+    newest-first and stop as soon as they reach an already-synced note —
+    normally just page 1. The very first run has no watermark, so it walks
+    the full history instead, persisting progress (my_notes_backfill_cursor)
+    after each page so an interrupted backfill can resume where it left off.
+    """
+    url = f"https://substack.com/api/v1/reader/feed/profile/{USER_ID}"
+    last_synced_at = get_state(conn, "my_notes_last_synced_at")
+    backfilling = last_synced_at is None
+    cursor = get_state(conn, "my_notes_backfill_cursor") if backfilling else None
+
+    newest_seen = None
+    total_stored = 0
+    total_updated = 0
+    page = 0
+    reached_watermark = False
+
+    print(f"{ts()} Checking for new Notes...")
+
+    while True:
+        data = get(url, {"cursor": cursor} if cursor else None)
+        items = data.get("items", [])
+        if not items:
+            break
+        page += 1
+
+        for item in items:
+            if item.get("context", {}).get("type") != "note":
+                continue  # skip restacks and other feed entry types
+            c = item.get("comment") or {}
+            if not c.get("id"):
+                continue
+
+            note_date = c.get("date", "")
+            if newest_seen is None or note_date > newest_seen:
+                newest_seen = note_date
+            if last_synced_at and note_date <= last_synced_at:
+                reached_watermark = True
+                break
+
+            note_url = f"https://substack.com/@{HANDLE}/note/c-{c['id']}"
+            existing = conn.execute("SELECT 1 FROM comments WHERE id=?", (c["id"],)).fetchone()
+            if existing:
+                conn.execute("UPDATE comments SET raw_json=?, body=? WHERE id=?",
+                             (json.dumps(c), c.get("body", ""), c["id"]))
+                total_updated += 1
+            else:
+                _store_comment(conn, c, pub_subdomain=None, post_id=None,
+                               post_title="Note", post_url=note_url)
+                total_stored += 1
+
+        conn.commit()
+        print(f"{ts()}   page {page} — {total_stored} new, {total_updated} refreshed so far")
+
+        if reached_watermark:
+            break
+
+        next_cursor = data.get("nextCursor")
+        if not next_cursor:
+            break
+        cursor = next_cursor
+        if backfilling:
+            set_state(conn, "my_notes_backfill_cursor", cursor)
+            conn.commit()
+        time.sleep(1)
+
+    if newest_seen and (last_synced_at is None or newest_seen > last_synced_at):
+        set_state(conn, "my_notes_last_synced_at", newest_seen)
+        conn.commit()
+
+    total_notes = conn.execute("""
+        SELECT COUNT(*) FROM comments WHERE user_id=? AND post_id IS NULL AND pub_subdomain IS NULL
+    """, (USER_ID,)).fetchone()[0]
+    print(f"{ts()} Notes sync done: {total_stored} new, {total_updated} refreshed, {total_notes} total notes in DB")
+    return total_stored
+
+
 def _store_comment(conn, c, pub_subdomain, post_id, post_title, post_url):
     if not c or not c.get("id"):
         return
@@ -1028,7 +1112,7 @@ def main():
             args.discard(as_of_date)
 
     if not args:
-        print("Usage: python scraper.py [sync] [report] [load-post --pub X] [sync-posts --pub X] [--as-of YYYY-MM-DD]")
+        print("Usage: python scraper.py [sync] [report] [my-notes] [load-post --pub X] [sync-posts --pub X] [--as-of YYYY-MM-DD]")
         sys.exit(0)
 
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
@@ -1054,6 +1138,9 @@ def main():
                 sys.exit(1)
             refresh_post_comments(conn, pub)
 
+        if "my-notes" in args:
+            sync_my_notes(conn)
+
         if "sync" in args:
             if as_of_date:
                 print(f"{ts()} Starting sync (--as-of {as_of_date})...")
@@ -1066,7 +1153,10 @@ def main():
                 time.sleep(3)
                 still_unresponded += recheck_note_replies(conn)
 
-                # Step 2: always fetch a full target of new replies from new activity
+                # Step 2: fetch any Notes written since the last sync
+                sync_my_notes(conn)
+
+                # Step 3: always fetch a full target of new replies from new activity
                 new_items, new_unresponded = 0, 0
                 oldest_ts = None
                 new_items, new_unresponded, oldest_ts = sync_activity_feed(
@@ -1075,14 +1165,23 @@ def main():
                     set_last_synced=True,
                 )
 
-                # Step 3: backfill older history if we haven't fetched everything
+                # Step 4: backfill older history if we haven't fetched everything
                 if new_unresponded < count:
                     remaining = count - new_unresponded
                     oldest_cursor = get_state(conn, "backfill_cursor")
                     if oldest_cursor:
                         print(f"{ts()} Backfilling — need {remaining} more replies...")
-                        sync_activity_feed(conn, target=remaining, after_cursor=oldest_cursor,
-                                           set_last_synced=False, stop_on_empty=True)
+                        _, backfill_unresponded, _ = sync_activity_feed(
+                            conn, target=remaining, after_cursor=oldest_cursor,
+                            set_last_synced=False, stop_on_empty=True)
+                        new_unresponded += backfill_unresponded
+
+                # Substack's feed caps how far a single pagination walk can go, so a
+                # requested count can go unmet even with no error — call that out
+                # explicitly rather than let it pass silently.
+                if new_unresponded < count:
+                    print(f"{ts()} Only found {new_unresponded} of {count} requested replies — "
+                          f"reached the end of available history for this pass. Run sync again to continue further back.")
 
                 conn.execute("INSERT INTO sync_log VALUES (?,?,?)",
                              (datetime.now(timezone.utc).isoformat(), "activity_feed", new_items))

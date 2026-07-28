@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    from config import USER_ID, OWN_PUBS
+    from config import USER_ID, OWN_PUBS, HANDLE
 except ImportError:
     print("Error: config.py not found. Copy config.example.py to config.py and fill in your values.")
     sys.exit(1)
@@ -455,6 +455,35 @@ def load_post_comments_data(conn, pub_subdomain):
     return result
 
 
+def load_notes_data(conn):
+    """Return your authored Notes: standalone notes and replies you made in others' note threads.
+    Notes are stored in the comments table with post_id/pub_subdomain NULL, since they
+    aren't tied to a post; populated by `scraper.py sync` via sync_my_notes()."""
+    rows = conn.execute("""
+        SELECT id, body, date, ancestor_path, raw_json
+        FROM comments
+        WHERE user_id=? AND post_id IS NULL AND pub_subdomain IS NULL
+        ORDER BY date DESC
+    """, (USER_ID,)).fetchall()
+
+    standalone = []
+    thread_replies = []
+    for cid, body, date, ancestor_path, raw_json_str in rows:
+        raw = json.loads(raw_json_str or "{}")
+        note = {
+            "id": cid,
+            "body": body or "",
+            "date": (date or "")[:10],
+            "raw_date": date or "",
+            "link": f"https://substack.com/@{HANDLE}/note/c-{cid}",
+            "reaction_count": raw.get("reaction_count") or 0,
+            "restacks": raw.get("restacks") or 0,
+        }
+        (thread_replies if ancestor_path else standalone).append(note)
+
+    return {"standalone": standalone, "thread_replies": thread_replies}
+
+
 # ── HTML ──────────────────────────────────────────────────────────────────────
 
 def escape(s):
@@ -686,11 +715,75 @@ def render_post_comments_tab(posts_data, pub_subdomain, liked_acknowledged=True)
   {empty_html}"""
 
 
-def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None, liked_acknowledged=True):
+def render_note_card(n):
+    date = escape(format_date(n.get("raw_date", n["date"])))
+    LIMIT = 220
+    raw_body = n["body"]
+    if len(raw_body) <= LIMIT:
+        body_html = escape(raw_body)
+    else:
+        short = escape(raw_body[:LIMIT])
+        full = escape(raw_body)
+        body_html = f'<span class="thread-short">{short}<button class="thread-more" onclick="expandThread(this)">… more</button></span><span class="thread-full" style="display:none">{full}<button class="thread-more" onclick="collapseThread(this)"> less</button></span>'
+    link = n.get("link", "")
+    meta_bits = []
+    if n.get("reaction_count"):
+        meta_bits.append(f"❤️ {n['reaction_count']}")
+    if n.get("restacks"):
+        meta_bits.append(f"🔁 {n['restacks']}")
+    meta_html = f'<span class="liked-badge">{" · ".join(meta_bits)}</span>' if meta_bits else ""
+    link_html = f'<a href="{escape(link)}" target="_blank" class="reply-link">Open →</a>' if link else ""
+
+    return f"""    <div class="post-comment-card" data-date="{n.get('date','')}">
+      <div class="card-header">
+        <div class="card-meta">{meta_html}<span class="date">{date}</span></div>
+        <div class="card-actions">{link_html}</div>
+      </div>
+      <div class="their-content">{body_html}</div>
+    </div>"""
+
+
+def render_notes_tab(notes_data):
+    standalone = notes_data.get("standalone", [])
+    thread_replies = notes_data.get("thread_replies", [])
+
+    if not standalone and not thread_replies:
+        return """  <div class="posts-controls">
+    <div style="font-size:0.82rem; color:#888;">Notes are pulled in automatically whenever you hit Sync on the Replies tab.</div>
+  </div>
+  <div class="empty" style="margin-top:40px;">No Notes synced yet — click Sync on the Replies tab to fetch them.</div>"""
+
+    total = len(standalone)
+    banner_html = f'<div class="count-banner" style="margin-bottom:16px;">📝 <span id="notes-count">{total}</span> {"Note" if total == 1 else "Notes"} written</div>'
+    cards_html = "\n".join(render_note_card(n) for n in standalone)
+
+    replies_toggle = ""
+    if thread_replies:
+        replies_html = "\n".join(render_note_card(n) for n in thread_replies)
+        replies_toggle = f"""
+  <div class="toggle-section" id="notes-replies-toggle-wrap">
+    <button class="toggle-btn" onclick="toggleSection(this)">▶ Replies to others' notes (<span id="notes-replies-count">{len(thread_replies)}</span>)</button>
+    <div class="liked-section" id="notes-replies-section">
+      <div class="cards" id="notes-replies-cards">{replies_html}</div>
+    </div>
+  </div>"""
+
+    return f"""  <div class="posts-controls">
+    <div style="font-size:0.82rem; color:#888;">Notes are pulled in automatically whenever you hit Sync on the Replies tab.</div>
+  </div>
+  {banner_html}
+  <div class="cards" id="notes-cards">
+    {cards_html}
+  </div>
+  {replies_toggle}"""
+
+
+def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pubs=None, responded_items=None, archived_items=None, liked_acknowledged=True, notes_data=None):
     all_posts_data = all_posts_data or {}
     all_pubs = all_pubs or []
     responded_items = responded_items or []
     archived_items = archived_items or []
+    notes_data = notes_data or {"standalone": [], "thread_replies": []}
 
     if liked_acknowledged:
         needs_response = [i for i in items if not i.get("liked") and i.get("source") != "own_pub"]
@@ -955,6 +1048,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
 
   <div class="tab-nav">
     <button class="tab-btn" id="tab-btn-replies" data-label="Replies" onclick="switchTab('replies')">Replies</button>
+    <button class="tab-btn" id="tab-btn-notes" data-label="Notes" onclick="switchTab('notes')">Notes</button>
     {pub_tabs_html}
   </div>
 
@@ -998,12 +1092,17 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     {"<div class='toggle-section' id='archived-toggle-wrap'><button class='toggle-btn' onclick='toggleArchived(this)'>▶ Archived (<span id='archived-count'>" + str(archived_count) + "</span>)</button><div class='liked-section' id='archived-section'><div class='cards' id='archived-cards'>" + archived_cards + "</div></div></div>" if archived_count else ""}
   </div>
 
+  <div id="tab-content-notes" style="display:none">
+    {render_notes_tab(notes_data)}
+  </div>
+
   {pub_contents_html}
 
   <script>
     const initTab = "{active_tab}";
 
     const allPubs = {json.dumps(all_pubs)};
+    const allTabs = allPubs.concat(['notes']);
 
     function showReloadOverlay() {{
       const overlay = document.getElementById('page-loading');
@@ -1020,7 +1119,7 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
     function switchTab(tab) {{
       // Hide all tabs
       document.getElementById('tab-replies').style.display = 'none';
-      allPubs.forEach(p => {{
+      allTabs.forEach(p => {{
         const el = document.getElementById('tab-content-' + p);
         if (el) el.style.display = 'none';
         const btn = document.getElementById('tab-btn-' + p);
@@ -1314,6 +1413,17 @@ def render_html(items, stats, all_posts_data=None, active_tab="replies", all_pub
       }});
 
       setTabLabel('replies', hasFilter ? repliesTotal : null);
+
+      // ── Notes tab ──
+      {{
+        let notesTotal = 0;
+        document.querySelectorAll('#notes-cards .post-comment-card, #notes-replies-cards .post-comment-card').forEach(card => {{
+          const show = cardMatches(card, '', keyQ, dateFrom, dateTo);
+          card.style.display = show ? '' : 'none';
+          if (show) notesTotal++;
+        }});
+        setTabLabel('notes', hasFilter ? notesTotal : null);
+      }}
 
       // ── Pub tabs ──
       allPubs.forEach(pub => {{

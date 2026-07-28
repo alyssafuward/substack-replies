@@ -17,7 +17,7 @@ import threading
 from pathlib import Path
 from flask import Flask, Response, request, redirect, jsonify
 
-from dashboard import load_data, load_stats, load_post_comments_data, load_responded_data, load_archived_data, render_html
+from dashboard import load_data, load_stats, load_post_comments_data, load_responded_data, load_archived_data, load_notes_data, render_html
 from scraper import init_db, load_next_post, refresh_post_comments
 from insights import load_all as load_insights, render_insights_html, search_commenter
 
@@ -134,7 +134,7 @@ def sync_status():
 
 @app.route("/sync")
 def sync():
-    count = request.args.get("count", 250, type=int)
+    count = request.args.get("count", 150, type=int)
     cmd = [sys.executable, "-u", "scraper.py", "sync", "--count", str(count)]
     return Response(_stream(cmd), mimetype="text/event-stream", headers=_SSE_HEADERS)
 
@@ -225,12 +225,14 @@ def index():
         all_posts_data = {pub: load_post_comments_data(conn, pub) for pub in all_pubs}
         responded_items = load_responded_data(conn)
         archived_items = load_archived_data(conn)
+        notes_data = load_notes_data(conn)
 
     html = render_html(items, stats, all_posts_data=all_posts_data,
                        active_tab=active_tab, all_pubs=all_pubs,
                        responded_items=responded_items,
                        archived_items=archived_items,
-                       liked_acknowledged=liked_ack)
+                       liked_acknowledged=liked_ack,
+                       notes_data=notes_data)
     return Response(html, mimetype="text/html")
 
 
@@ -267,8 +269,7 @@ def render_empty():
         <option value="25" selected>25</option>
         <option value="50">50</option>
         <option value="100">100</option>
-        <option value="200">200</option>
-        <option value="250">250</option>
+        <option value="150">150</option>
       </select>
       <button class="sync-btn" id="sync-btn" onclick="startSync()">Sync</button>
       <button class="sync-btn" id="stop-btn" onclick="stopSync()" style="display:none; background:#888;">Stop</button>
