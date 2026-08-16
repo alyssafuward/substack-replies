@@ -196,6 +196,35 @@ Recheck runs at the start of every sync. It re-examines items previously marked 
 
 ---
 
+## 8. Subscriber Tracking
+
+### 8.1 Separate subscriber DB
+**What:** Track the Substack subscriber list (email, plan, signup date, active/expiry status) in its own SQLite DB, kept apart from `replies.db` since comments and subscribers are different entities with no shared key (subscriber CSV exports have no display name).
+**Status:** ✅
+**Where:** `subscribers.py` → `subscribers.db` (gitignored, local only, same pattern as `replies.db`)
+
+### 8.2 Import full CSV export
+**What:** Import Substack's subscriber CSV export (Settings → Subscribers → export) — email, active_subscription, expiry, plan, email_disabled, created_at, first_payment_at.
+**Status:** ✅
+**Where:** `subscribers.py` → `import_csv()`; run as `python subscribers.py <path-to-csv>`
+
+### 8.3 Top up from screenshots between exports
+**What:** Add or update subscriber rows from data Claude reads off a screenshot of the Substack subscriber dashboard (email, plan tag, star/quality rating, signup date — no expiry or first_payment_at, since the dashboard view doesn't show those).
+**Status:** ✅
+**Where:** `subscribers.py` → `import_screenshot_rows()`
+
+### 8.4 Merge, don't overwrite, on upsert
+**What:** Upserting by (email, publication) only overwrites a field when the new value is non-empty and different, so a partial screenshot row never blanks out richer CSV fields (expiry, first_payment_at), and a later CSV re-import never erases a `quality_stars` value that only ever came from a screenshot.
+**Status:** ✅
+**Where:** `subscribers.py` → `upsert()`
+
+### 8.5 Track multiple publications and dedupe across them
+**What:** Alyssa runs three Substacks (alyssafuward, thehartstudio, createwithalyssa) with overlapping subscribers. Each row is keyed by (email, publication), so the same person subscribed to two publications gets two rows. `python subscribers.py --summary` prints per-publication counts, the deduped unique total across all publications, and pairwise/all-publication overlap counts.
+**Status:** ✅
+**Where:** `subscribers.py` → `dedupe_summary()`, `print_dedupe_summary()`; publication is inferred from the CSV filename (`email_list.<publication>.csv`)
+
+---
+
 ## Open bugs summary
 
 | ID | Description | Severity |
