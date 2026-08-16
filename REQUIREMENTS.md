@@ -214,9 +214,14 @@ Recheck runs at the start of every sync. It re-examines items previously marked 
 **Where:** `subscribers.py` → `import_screenshot_rows()`
 
 ### 8.4 Merge, don't overwrite, on upsert
-**What:** Upserting by email only overwrites a field when the new value is non-empty and different, so a partial screenshot row never blanks out richer CSV fields (expiry, first_payment_at), and a later CSV re-import never erases a `quality_stars` value that only ever came from a screenshot.
+**What:** Upserting by (email, publication) only overwrites a field when the new value is non-empty and different, so a partial screenshot row never blanks out richer CSV fields (expiry, first_payment_at), and a later CSV re-import never erases a `quality_stars` value that only ever came from a screenshot.
 **Status:** ✅
 **Where:** `subscribers.py` → `upsert()`
+
+### 8.5 Track multiple publications and dedupe across them
+**What:** Alyssa runs three Substacks (alyssafuward, thehartstudio, createwithalyssa) with overlapping subscribers. Each row is keyed by (email, publication), so the same person subscribed to two publications gets two rows. `python subscribers.py --summary` prints per-publication counts, the deduped unique total across all publications, and pairwise/all-publication overlap counts.
+**Status:** ✅
+**Where:** `subscribers.py` → `dedupe_summary()`, `print_dedupe_summary()`; publication is inferred from the CSV filename (`email_list.<publication>.csv`)
 
 ---
 
