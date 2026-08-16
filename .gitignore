@@ -1,4 +1,5 @@
 replies.db*
+subscribers.db*
 .env
 config.py
 *.bak
