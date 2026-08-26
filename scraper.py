@@ -8,6 +8,7 @@ Usage:
   python scraper.py sync     # fetch new data
   python scraper.py report   # show what needs responses
   python scraper.py sync report  # do both
+  python scraper.py fetch-articles --pub SUBDOMAIN  # fetch full article text for content analysis
 """
 
 import os
@@ -133,6 +134,14 @@ def init_db(conn):
     for ddl in (
         "ALTER TABLE activity_items ADD COLUMN is_responded INTEGER DEFAULT 0",
         "ALTER TABLE activity_items ADD COLUMN is_archived INTEGER DEFAULT 0",
+        "ALTER TABLE posts ADD COLUMN subtitle TEXT",
+        "ALTER TABLE posts ADD COLUMN body_html TEXT",
+        "ALTER TABLE posts ADD COLUMN body_markdown TEXT",
+        "ALTER TABLE posts ADD COLUMN wordcount INTEGER",
+        "ALTER TABLE posts ADD COLUMN tags TEXT",
+        "ALTER TABLE posts ADD COLUMN audience TEXT",
+        "ALTER TABLE posts ADD COLUMN updated_at TEXT",
+        "ALTER TABLE posts ADD COLUMN body_fetched_at TEXT",
     ):
         try:
             conn.execute(ddl)
@@ -825,6 +834,75 @@ def flatten_comments(comments):
     return result
 
 
+# ── Article Archive ───────────────────────────────────────────────────────────
+
+def html_to_markdown(html):
+    if not html:
+        return ""
+    import html2text
+    h = html2text.HTML2Text()
+    h.body_width = 0  # don't hard-wrap lines
+    h.ignore_images = False
+    return h.handle(html)
+
+
+def fetch_full_post(subdomain, slug):
+    """Fetch the full single-post payload, including body_html, for one article."""
+    return get(f"https://{subdomain}.substack.com/api/v1/posts/{slug}")
+
+
+def fetch_article_bodies(conn, pub_subdomain=None, force=False):
+    """
+    Fetch full article text (body_html -> body_markdown) for posts already
+    known in the `posts` table (via load-posts/load-post). Skips posts that
+    already have a body unless force=True.
+    """
+    where = "WHERE slug IS NOT NULL"
+    params = []
+    if pub_subdomain:
+        where += " AND pub_subdomain=?"
+        params.append(pub_subdomain)
+    if not force:
+        where += " AND body_html IS NULL"
+
+    rows = conn.execute(f"SELECT id, pub_subdomain, slug, title FROM posts {where}", params).fetchall()
+    if not rows:
+        print(f"{ts()} No articles need fetching.")
+        return 0
+
+    print(f"{ts()} Fetching full text for {len(rows)} article(s)...")
+    fetched = 0
+    for post_id, subdomain, slug, title in rows:
+        try:
+            data = fetch_full_post(subdomain, slug)
+        except Exception as e:
+            if "RATE_LIMITED" in str(e):
+                print(f"{ts()} Rate limited — stopping. Fetched {fetched}/{len(rows)}. Run again to continue.")
+                break
+            print(f"    Warning: couldn't fetch \"{title}\": {e}")
+            continue
+
+        body_html = data.get("body_html", "") or ""
+        tags = json.dumps([t.get("name") for t in data.get("postTags", []) if t.get("name")])
+        conn.execute("""
+            UPDATE posts SET
+                subtitle=?, body_html=?, body_markdown=?, wordcount=?,
+                tags=?, audience=?, updated_at=?, body_fetched_at=?
+            WHERE id=?
+        """, (
+            data.get("subtitle"), body_html, html_to_markdown(body_html), data.get("wordcount"),
+            tags, data.get("audience"), data.get("updated_at"),
+            datetime.now(timezone.utc).isoformat(), post_id,
+        ))
+        conn.commit()
+        fetched += 1
+        print(f"    [{fetched}/{len(rows)}] {title}")
+        time.sleep(0.5)
+
+    print(f"{ts()} Done. Fetched {fetched} article(s).")
+    return fetched
+
+
 # ── Post Comments Tab ─────────────────────────────────────────────────────────
 
 def load_next_post(conn, pub_subdomain):
@@ -1151,6 +1229,9 @@ def main():
             args.discard("--pub")
             args.discard(argv[idx + 1])
 
+    force = "--force" in args
+    args.discard("--force")
+
     # Parse --as-of YYYY-MM-DD (simulate syncing as of a past date)
     as_of_date = None
     as_of_cursor = None
@@ -1165,7 +1246,8 @@ def main():
             args.discard(as_of_date)
 
     if not args:
-        print("Usage: python scraper.py [sync] [report] [my-notes] [load-post --pub X] [sync-posts --pub X] [--as-of YYYY-MM-DD] [--count N]")
+        print("Usage: python scraper.py [sync] [report] [my-notes] [load-post --pub X] [sync-posts --pub X] "
+              "[fetch-articles --pub X] [--force] [--as-of YYYY-MM-DD] [--count N]")
         sys.exit(0)
 
     with sqlite3.connect(DB_PATH, timeout=30) as conn:
@@ -1190,6 +1272,9 @@ def main():
                 print("Error: --pub required for sync-posts")
                 sys.exit(1)
             refresh_post_comments(conn, pub)
+
+        if "fetch-articles" in args:
+            fetch_article_bodies(conn, pub_subdomain=pub, force=force)
 
         if "my-notes" in args:
             notes_found = sync_my_notes(conn, target=count, set_last_synced=True)
