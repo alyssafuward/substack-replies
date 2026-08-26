@@ -1,2 +1,3 @@
 requests
 flask
+html2text
